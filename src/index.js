@@ -1,0 +1,515 @@
+import 'dotenv/config';
+import { Telegraf, Markup } from 'telegraf';
+import { AsterAPI } from './asterdex.js';
+import { BNBWallet } from './bnb-wallet.js';
+
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const ASTER_API_KEY = process.env.ASTER_API_KEY;
+const ASTER_API_SECRET = process.env.ASTER_API_SECRET;
+
+if (!BOT_TOKEN || !ASTER_API_KEY || !ASTER_API_SECRET) {
+  console.error('Missing required environment variables in .env');
+  process.exit(1);
+}
+
+const bot = new Telegraf(BOT_TOKEN);
+const asterAPI = new AsterAPI(ASTER_API_KEY, ASTER_API_SECRET);
+const bnbWallet = new BNBWallet();
+
+// User session storage
+const userSessions = new Map();
+
+// Start command - Initialize account
+bot.start(async (ctx) => {
+  const userId = ctx.from.id;
+  
+  try {
+    // Get wallet address from BNB wallet
+    const walletAddress = bnbWallet.getAddress();
+    
+    // Initialize user session
+    userSessions.set(userId, {
+      walletAddress: walletAddress,
+      isInitialized: true,
+      tradingFlow: null
+    });
+
+    const welcomeMessage = `
+🚀 **Welcome to AsterDex BNB Trading Bot!**
+
+I'll help you trade BNB pairs on AsterDex through Telegram.
+
+**Your Account:**
+✅ Account initialized successfully
+✅ Wallet address: \`${walletAddress}\`
+✅ Ready for trading
+
+**Getting Started:**
+1. Use /balance to check your BNB balance
+2. Use /deposit to fund your trading account
+3. Use /markets to see available BNB pairs
+4. Use /long or /short to start trading
+
+**Available Commands:**
+/help - Show all commands
+/balance - Check balances
+/deposit - Deposit BNB
+/long - Open long position
+/short - Open short position
+/close - Close positions
+/positions - View positions
+/price - Get market prices
+/markets - Available markets
+
+Ready to trade? Let's go! 🎯
+    `;
+
+    await ctx.reply(welcomeMessage, { parse_mode: 'Markdown' });
+  } catch (error) {
+    await ctx.reply(`Error initializing account: ${error.message}`);
+  }
+});
+
+// Help command
+bot.help(async (ctx) => {
+  const helpText = `
+📋 **Available Commands:**
+
+**Wallet & Balance:**
+/balance - Check BNB and trading balances
+/deposit [amount|all] - Deposit BNB to trading account
+/export - Export wallet keys
+
+**Trading:**
+/long - Open long position (interactive)
+/short - Open short position (interactive)
+/close - Close existing positions
+/positions [symbol] - View your positions
+
+**Market Info:**
+/price [symbol] - Get current prices
+/markets - List all available BNB pairs
+
+**Examples:**
+/price BNB
+/positions BTC
+/deposit 0.1
+  `;
+
+  await ctx.reply(helpText, { parse_mode: 'Markdown' });
+});
+
+// Balance command
+bot.command('balance', async (ctx) => {
+  try {
+    const userId = ctx.from.id;
+    const session = userSessions.get(userId);
+    
+    if (!session?.isInitialized) {
+      return ctx.reply('Please use /start first to initialize your account.');
+    }
+
+    // Get BNB balance from wallet
+    const bnbBalance = await bnbWallet.getBalance();
+    
+    // Get trading account balance from AsterDex
+    const tradingBalance = await asterAPI.getAccountBalance();
+    
+    const balanceMessage = `
+💰 **Your Balances:**
+
+**BNB Wallet:** ${bnbBalance} BNB
+**Trading Account:** ${tradingBalance.available} USDT
+**Total Margin:** ${tradingBalance.total} USDT
+
+💡 Use /deposit to move BNB to your trading account
+    `;
+
+    await ctx.reply(balanceMessage, { parse_mode: 'Markdown' });
+  } catch (error) {
+    await ctx.reply(`Error getting balance: ${error.message}`);
+  }
+});
+
+// Deposit command
+bot.command('deposit', async (ctx) => {
+  try {
+    const args = ctx.message.text.split(' ');
+    const amount = args[1];
+    
+    if (!amount) {
+      return ctx.reply('Usage: /deposit [amount|all]\nExample: /deposit 0.1 or /deposit all');
+    }
+
+    const userId = ctx.from.id;
+    const session = userSessions.get(userId);
+    
+    if (!session?.isInitialized) {
+      return ctx.reply('Please use /start first to initialize your account.');
+    }
+
+    let depositAmount;
+    if (amount === 'all') {
+      const balance = await bnbWallet.getBalance();
+      depositAmount = Math.max(0, balance - 0.005); // Keep 0.005 BNB for gas
+    } else {
+      depositAmount = parseFloat(amount);
+      if (isNaN(depositAmount) || depositAmount <= 0) {
+        return ctx.reply('Invalid amount. Please enter a valid number.');
+      }
+    }
+
+    if (depositAmount < 0.01) {
+      return ctx.reply('Minimum deposit is 0.01 BNB');
+    }
+
+    // Show deposit address and instructions
+    const depositMessage = `
+💳 **Deposit Instructions:**
+
+**Your BNB Address:** \`${session.walletAddress}\`
+
+**Amount to Deposit:** ${depositAmount} BNB
+
+**Steps:**
+1. Send ${depositAmount} BNB to the address above
+2. Wait for 1-2 confirmations
+3. Your funds will appear in your trading account
+
+⚠️ **Important:** Only send BNB to this address!
+    `;
+
+    await ctx.reply(depositMessage, { parse_mode: 'Markdown' });
+  } catch (error) {
+    await ctx.reply(`Error processing deposit: ${error.message}`);
+  }
+});
+
+// Markets command
+bot.command('markets', async (ctx) => {
+  try {
+    const markets = await asterAPI.getMarkets();
+    
+    let marketList = '📈 **Available BNB Markets:**\n\n';
+    
+    markets.forEach(market => {
+      marketList += `**${market.symbol}** - Max Leverage: ${market.maxLeverage}x\n`;
+    });
+    
+    marketList += `\nTotal: ${markets.length} BNB pairs available`;
+    
+    await ctx.reply(marketList, { parse_mode: 'Markdown' });
+  } catch (error) {
+    await ctx.reply(`Error fetching markets: ${error.message}`);
+  }
+});
+
+// Debug command to see all symbols
+bot.command('debug', async (ctx) => {
+  try {
+    const symbols = await asterAPI.getAllSymbols();
+    const first10 = symbols.slice(0, 10);
+    const bnbSymbols = symbols.filter(s => s.includes('BNB'));
+    
+    let debugInfo = '🔍 **Debug Info:**\n\n';
+    debugInfo += `**Total Symbols:** ${symbols.length}\n`;
+    debugInfo += `**BNB Symbols:** ${bnbSymbols.length}\n\n`;
+    debugInfo += `**First 10 symbols:**\n${first10.join('\n')}\n\n`;
+    debugInfo += `**BNB symbols:**\n${bnbSymbols.slice(0, 5).join('\n')}`;
+    
+    await ctx.reply(debugInfo, { parse_mode: 'Markdown' });
+  } catch (error) {
+    await ctx.reply(`Debug error: ${error.message}`);
+  }
+});
+
+// Price command
+bot.command('price', async (ctx) => {
+  try {
+    const args = ctx.message.text.split(' ');
+    const symbol = args[1] || 'BNB';
+    
+    const price = await asterAPI.getPrice(symbol);
+    
+    const priceMessage = `
+📊 **${symbol} Price:**
+
+**Current:** $${price.price}
+**24h Change:** ${price.change24h}%
+**24h High:** $${price.high24h}
+**24h Low:** $${price.low24h}
+**Volume:** $${price.volume24h}
+    `;
+    
+    await ctx.reply(priceMessage, { parse_mode: 'Markdown' });
+  } catch (error) {
+    await ctx.reply(`Error getting price: ${error.message}`);
+  }
+});
+
+// Long position command
+bot.command('long', async (ctx) => {
+  try {
+    const userId = ctx.from.id;
+    const session = userSessions.get(userId);
+    
+    if (!session?.isInitialized) {
+      return ctx.reply('Please use /start first to initialize your account.');
+    }
+
+    // Start interactive long position flow
+    session.tradingFlow = { type: 'long', step: 'select_asset' };
+    userSessions.set(userId, session);
+
+    const markets = await asterAPI.getMarkets();
+    const bnbMarkets = markets.filter(m => m.symbol.includes('BNB')).slice(0, 10);
+    
+    const keyboard = bnbMarkets.map(market => 
+      [Markup.button.callback(market.symbol, `select_asset_${market.symbol}`)]
+    );
+    
+    await ctx.reply(
+      '📈 **Open Long Position**\n\nSelect the asset you want to trade:',
+      Markup.inlineKeyboard(keyboard)
+    );
+  } catch (error) {
+    await ctx.reply(`Error starting long position: ${error.message}`);
+  }
+});
+
+// Short position command
+bot.command('short', async (ctx) => {
+  try {
+    const userId = ctx.from.id;
+    const session = userSessions.get(userId);
+    
+    if (!session?.isInitialized) {
+      return ctx.reply('Please use /start first to initialize your account.');
+    }
+
+    // Start interactive short position flow
+    session.tradingFlow = { type: 'short', step: 'select_asset' };
+    userSessions.set(userId, session);
+
+    const markets = await asterAPI.getMarkets();
+    const bnbMarkets = markets.filter(m => m.symbol.includes('BNB')).slice(0, 10);
+    
+    const keyboard = bnbMarkets.map(market => 
+      [Markup.button.callback(market.symbol, `select_asset_${market.symbol}`)]
+    );
+    
+    await ctx.reply(
+      '📉 **Open Short Position**\n\nSelect the asset you want to trade:',
+      Markup.inlineKeyboard(keyboard)
+    );
+  } catch (error) {
+    await ctx.reply(`Error starting short position: ${error.message}`);
+  }
+});
+
+// Positions command
+bot.command('positions', async (ctx) => {
+  try {
+    const args = ctx.message.text.split(' ');
+    const symbol = args[1];
+    
+    const positions = await asterAPI.getPositions(symbol);
+    
+    if (positions.length === 0) {
+      return ctx.reply('No open positions found.');
+    }
+    
+    let positionsList = '📊 **Your Positions:**\n\n';
+    
+    positions.forEach(pos => {
+      const pnl = pos.unrealizedPnl >= 0 ? `+$${pos.unrealizedPnl}` : `-$${Math.abs(pos.unrealizedPnl)}`;
+      const pnlEmoji = pos.unrealizedPnl >= 0 ? '🟢' : '🔴';
+      
+      positionsList += `${pnlEmoji} **${pos.symbol}**\n`;
+      positionsList += `Size: ${pos.size} | Leverage: ${pos.leverage}x\n`;
+      positionsList += `Entry: $${pos.entryPrice} | Current: $${pos.markPrice}\n`;
+      positionsList += `PnL: ${pnl}\n\n`;
+    });
+    
+    await ctx.reply(positionsList, { parse_mode: 'Markdown' });
+  } catch (error) {
+    await ctx.reply(`Error fetching positions: ${error.message}`);
+  }
+});
+
+// Close positions command
+bot.command('close', async (ctx) => {
+  try {
+    const positions = await asterAPI.getPositions();
+    
+    if (positions.length === 0) {
+      return ctx.reply('No open positions to close.');
+    }
+    
+    const keyboard = positions.map(pos => 
+      [Markup.button.callback(`${pos.symbol} (${pos.size})`, `close_${pos.id}`)]
+    );
+    
+    await ctx.reply(
+      '🔒 **Close Position**\n\nSelect position to close:',
+      Markup.inlineKeyboard(keyboard)
+    );
+  } catch (error) {
+    await ctx.reply(`Error fetching positions: ${error.message}`);
+  }
+});
+
+// Handle callback queries for interactive flows
+bot.on('callback_query', async (ctx) => {
+  const data = ctx.callbackQuery.data;
+  const userId = ctx.from.id;
+  const session = userSessions.get(userId);
+  
+  try {
+    if (data.startsWith('select_asset_')) {
+      const symbol = data.replace('select_asset_', '');
+      session.tradingFlow.asset = symbol;
+      session.tradingFlow.step = 'enter_size';
+      userSessions.set(userId, session);
+      
+      await ctx.answerCbQuery();
+      await ctx.editMessageText(
+        `Selected: ${symbol}\n\nEnter position size (in USDT):\nExample: 100`
+      );
+    }
+    
+    if (data.startsWith('close_')) {
+      const positionId = data.replace('close_', '');
+      await asterAPI.closePosition(positionId);
+      
+      await ctx.answerCbQuery();
+      await ctx.editMessageText('✅ Position closed successfully!');
+    }
+  } catch (error) {
+    await ctx.answerCbQuery();
+    await ctx.reply(`Error: ${error.message}`);
+  }
+});
+
+// Handle text messages for position size input
+bot.on('text', async (ctx) => {
+  const userId = ctx.from.id;
+  const session = userSessions.get(userId);
+  
+  if (session?.tradingFlow?.step === 'enter_size') {
+    try {
+      const size = parseFloat(ctx.message.text);
+      if (isNaN(size) || size <= 0) {
+        return ctx.reply('Invalid size. Please enter a valid number.');
+      }
+      
+      session.tradingFlow.size = size;
+      session.tradingFlow.step = 'enter_leverage';
+      userSessions.set(userId, session);
+      
+      const leverageKeyboard = [
+        [Markup.button.callback('2x', 'leverage_2'), Markup.button.callback('5x', 'leverage_5')],
+        [Markup.button.callback('10x', 'leverage_10'), Markup.button.callback('20x', 'leverage_20')],
+        [Markup.button.callback('50x', 'leverage_50'), Markup.button.callback('100x', 'leverage_100')]
+      ];
+      
+      await ctx.reply(
+        `Size: ${size} USDT\n\nSelect leverage:`,
+        Markup.inlineKeyboard(leverageKeyboard)
+      );
+    } catch (error) {
+      await ctx.reply(`Error: ${error.message}`);
+    }
+  }
+});
+
+// Handle leverage selection
+bot.on('callback_query', async (ctx) => {
+  const data = ctx.callbackQuery.data;
+  const userId = ctx.from.id;
+  const session = userSessions.get(userId);
+  
+  if (data.startsWith('leverage_') && session?.tradingFlow?.step === 'enter_leverage') {
+    try {
+      const leverage = parseInt(data.replace('leverage_', ''));
+      session.tradingFlow.leverage = leverage;
+      session.tradingFlow.step = 'confirm';
+      userSessions.set(userId, session);
+      
+      const { type, asset, size } = session.tradingFlow;
+      const side = type === 'long' ? 'Long' : 'Short';
+      
+      const confirmKeyboard = [
+        [Markup.button.callback('✅ Confirm Trade', 'confirm_trade')],
+        [Markup.button.callback('❌ Cancel', 'cancel_trade')]
+      ];
+      
+      await ctx.answerCbQuery();
+      await ctx.editMessageText(
+        `📋 **Trade Confirmation:**\n\n` +
+        `Asset: ${asset}\n` +
+        `Side: ${side}\n` +
+        `Size: ${size} USDT\n` +
+        `Leverage: ${leverage}x\n\n` +
+        `Confirm this trade?`,
+        Markup.inlineKeyboard(confirmKeyboard)
+      );
+    } catch (error) {
+      await ctx.answerCbQuery();
+      await ctx.reply(`Error: ${error.message}`);
+    }
+  }
+  
+  if (data === 'confirm_trade' && session?.tradingFlow?.step === 'confirm') {
+    try {
+      const { type, asset, size, leverage } = session.tradingFlow;
+      
+      const result = await asterAPI.placeOrder({
+        symbol: asset,
+        side: type,
+        size: size,
+        leverage: leverage
+      });
+      
+      session.tradingFlow = null;
+      userSessions.set(userId, session);
+      
+      await ctx.answerCbQuery();
+      await ctx.editMessageText(
+        `✅ **Trade Executed!**\n\n` +
+        `Order ID: ${result.orderId}\n` +
+        `Asset: ${asset}\n` +
+        `Side: ${type}\n` +
+        `Size: ${size} USDT\n` +
+        `Leverage: ${leverage}x`
+      );
+    } catch (error) {
+      await ctx.answerCbQuery();
+      await ctx.editMessageText(`❌ Trade failed: ${error.message}`);
+    }
+  }
+  
+  if (data === 'cancel_trade') {
+    session.tradingFlow = null;
+    userSessions.set(userId, session);
+    
+    await ctx.answerCbQuery();
+    await ctx.editMessageText('❌ Trade cancelled.');
+  }
+});
+
+// Error handling
+bot.catch((err, ctx) => {
+  console.error('Bot error:', err);
+  ctx.reply('An error occurred. Please try again.');
+});
+
+// Launch bot
+bot.launch().then(() => {
+  console.log('🚀 AsterDex BNB Trading Bot started!');
+});
+
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
+
+
