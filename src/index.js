@@ -4,19 +4,19 @@ import { AsterAPI } from './asterdex.js';
 import { BNBWallet } from './bnb-wallet.js';
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const MAIN_WALLET_ADDRESS = process.env.MAIN_WALLET_ADDRESS;
-const API_WALLET_ADDRESS = process.env.API_WALLET_ADDRESS;
-const API_WALLET_PRIVATE_KEY = process.env.API_WALLET_PRIVATE_KEY;
+// const MAIN_WALLET_ADDRESS = process.env.MAIN_WALLET_ADDRESS;
+// const API_WALLET_ADDRESS = process.env.API_WALLET_ADDRESS;
+// const API_WALLET_PRIVATE_KEY = process.env.API_WALLET_PRIVATE_KEY;
 const ASTER_API_KEY = process.env.ASTER_API_KEY;
 const ASTER_API_SECRET = process.env.ASTER_API_SECRET;
 
-if (!BOT_TOKEN || !MAIN_WALLET_ADDRESS || !API_WALLET_ADDRESS || !API_WALLET_PRIVATE_KEY || !ASTER_API_KEY || !ASTER_API_SECRET) {
+if (!BOT_TOKEN  || !ASTER_API_KEY || !ASTER_API_SECRET) {
   console.error('Missing required environment variables in .env');
   process.exit(1);
 }
 
 const bot = new Telegraf(BOT_TOKEN);
-const asterAPI = new AsterAPI(MAIN_WALLET_ADDRESS, API_WALLET_ADDRESS, API_WALLET_PRIVATE_KEY, ASTER_API_KEY, ASTER_API_SECRET);
+const asterAPI = new AsterAPI( ASTER_API_KEY, ASTER_API_SECRET);
 const bnbWallet = new BNBWallet();
 
 // User session storage
@@ -190,40 +190,43 @@ Your funds are now available in your futures account for trading.
 
 
 // Markets command
-bot.command('markets', async (ctx) => {
-  try {
-    const markets = await asterAPI.getMarkets();
+// bot.command('markets', async (ctx) => {
+//   try {
+//     const markets = await asterAPI.getMarkets();
     
-    let marketList = '📈 **Available BNB Markets:**\n\n';
+//     let marketList = '📈 **Available BNB Markets:**\n\n';
     
-    markets.forEach(market => {
-      marketList += `**${market.symbol}** - Max Leverage: ${market.maxLeverage}x\n`;
-    });
+//     markets.forEach(market => {
+//       marketList += `**${market.symbol}** - Max Leverage: ${market.maxLeverage}x\n`;
+//     });
     
-    marketList += `\nTotal: ${markets.length} BNB pairs available`;
+//     marketList += `\nTotal: ${markets.length} BNB pairs available`;
     
-    await ctx.reply(marketList, { parse_mode: 'Markdown' });
-  } catch (error) {
-    await ctx.reply(`❌ Unable to fetch markets: ${error.message}`);
-  }
-});
+//     await ctx.reply(marketList, { parse_mode: 'Markdown' });
+//   } catch (error) {
+//     await ctx.reply(`❌ Unable to fetch markets: ${error.message}`);
+//   }
+// });
 
 // Debug command to see all symbols
-bot.command('debug', async (ctx) => {
+// src/index.js
+
+// Markets command
+// Markets command
+bot.command('markets', async (ctx) => {
   try {
-    const symbols = await asterAPI.getAllSymbols();
-    const first10 = symbols.slice(0, 10);
-    const bnbSymbols = symbols.filter(s => s.includes('BNB'));
+    const markets = await asterAPI.getMarkets(); // This is now a simple array
     
-    let debugInfo = '🔍 **Debug Info:**\n\n';
-    debugInfo += `**Total Symbols:** ${symbols.length}\n`;
-    debugInfo += `**BNB Symbols:** ${bnbSymbols.length}\n\n`;
-    debugInfo += `**First 10 symbols:**\n${first10.join('\n')}\n\n`;
-    debugInfo += `**BNB symbols:**\n${bnbSymbols.slice(0, 5).join('\n')}`;
+    const marketList = markets
+        .slice(0, 20) // Show the first 20 markets
+        .map(market => `**${market.symbol}**`)
+        .join('\n');
+
+    const marketMessage = `📈 **Available Crypto Markets (${markets.length} pairs):**\n\n${marketList}\n\n...and more.`;
     
-    await ctx.reply(debugInfo, { parse_mode: 'Markdown' });
+    await ctx.reply(marketMessage, { parse_mode: 'Markdown' });
   } catch (error) {
-    await ctx.reply(`❌ Debug failed: ${error.message}`);
+    await ctx.reply(`❌ Unable to fetch markets: ${error.message}`);
   }
 });
 
@@ -252,64 +255,30 @@ bot.command('price', async (ctx) => {
 });
 
 // Long position command
-bot.command('long', async (ctx) => {
-  try {
-    const userId = ctx.from.id;
-    const session = userSessions.get(userId);
-    
-    if (!session?.isInitialized) {
+const startTradingFlow = async (ctx, tradeType) => {
+  const userId = ctx.from.id;
+  const session = userSessions.get(userId);
+  if (!session?.isInitialized) {
       return ctx.reply('Please use /start first to initialize your account.');
-    }
-
-    // Start interactive long position flow
-    session.tradingFlow = { type: 'long', step: 'select_asset' };
-    userSessions.set(userId, session);
-
-    const markets = await asterAPI.getMarkets();
-    const bnbMarkets = markets.filter(m => m.symbol.includes('BNB')).slice(0, 10);
-    
-    const keyboard = bnbMarkets.map(market => 
-      [Markup.button.callback(market.symbol, `select_asset_${market.symbol}`)]
-    );
-    
-    await ctx.reply(
-      '📈 **Open Long Position**\n\nSelect the asset you want to trade:',
-      Markup.inlineKeyboard(keyboard)
-    );
-  } catch (error) {
-    await ctx.reply(`❌ Unable to start long position: ${error.message}`);
   }
-});
 
-// Short position command
-bot.command('short', async (ctx) => {
-  try {
-    const userId = ctx.from.id;
-    const session = userSessions.get(userId);
-    
-    if (!session?.isInitialized) {
-      return ctx.reply('Please use /start first to initialize your account.');
-    }
+  session.tradingFlow = { type: tradeType, step: 'select_asset' };
+  userSessions.set(userId, session);
 
-    // Start interactive short position flow
-    session.tradingFlow = { type: 'short', step: 'select_asset' };
-    userSessions.set(userId, session);
-
-    const markets = await asterAPI.getMarkets();
-    const bnbMarkets = markets.filter(m => m.symbol.includes('BNB')).slice(0, 10);
-    
-    const keyboard = bnbMarkets.map(market => 
+  const markets = await asterAPI.getMarkets();
+  const keyboard = markets.slice(0, 10).map(market =>
       [Markup.button.callback(market.symbol, `select_asset_${market.symbol}`)]
-    );
-    
-    await ctx.reply(
-      '📉 **Open Short Position**\n\nSelect the asset you want to trade:',
-      Markup.inlineKeyboard(keyboard)
-    );
-  } catch (error) {
-    await ctx.reply(`❌ Unable to start short position: ${error.message}`);
-  }
-});
+  );
+  
+  const message = tradeType === 'long' 
+      ? '📈 **Open Long Position**\n\nSelect the asset you want to trade:' 
+      : '📉 **Open Short Position**\n\nSelect the asset you want to trade:';
+
+  await ctx.reply(message, Markup.inlineKeyboard(keyboard));
+};
+
+bot.command('long', (ctx) => startTradingFlow(ctx, 'long'));
+bot.command('short', (ctx) => startTradingFlow(ctx, 'short'));
 
 // Positions command
 bot.command('positions', async (ctx) => {
@@ -458,31 +427,52 @@ bot.on('callback_query', async (ctx) => {
 bot.on('text', async (ctx) => {
   const userId = ctx.from.id;
   const session = userSessions.get(userId);
-  
+
   if (session?.tradingFlow?.step === 'enter_size') {
-    try {
-      const size = parseFloat(ctx.message.text);
-      if (isNaN(size) || size <= 0) {
-        return ctx.reply('Invalid size. Please enter a valid number.');
+      try {
+          const size = parseFloat(ctx.message.text);
+          if (isNaN(size) || size <= 0) {
+              return ctx.reply('Invalid size. Please enter a positive number.');
+          }
+
+          session.tradingFlow.size = size;
+          session.tradingFlow.step = 'enter_leverage';
+          userSessions.set(userId, session);
+
+          const symbol = session.tradingFlow.asset;
+          await ctx.reply(`Fetching leverage options for ${symbol}...`);
+
+          // 1. Get the asset-specific max leverage using the new function
+          const maxLeverage = await asterAPI.getLeverageBrackets(symbol);
+
+          // 2. Define all possible leverage steps
+          const allLeverageSteps = [2, 5, 10, 20, 25, 50, 75, 100, 125];
+
+          // 3. Filter to show only valid options for this asset
+          const validLeverageOptions = allLeverageSteps.filter(step => step <= maxLeverage);
+          
+          // 4. Dynamically create the keyboard
+          const leverageKeyboard = [];
+          for (let i = 0; i < validLeverageOptions.length; i += 3) {
+              leverageKeyboard.push(
+                  validLeverageOptions.slice(i, i + 3).map(leverage => 
+                      Markup.button.callback(`${leverage}x`, `leverage_${leverage}`)
+                  )
+              );
+          }
+          
+          await ctx.reply(
+              `Size: ${size} USDT\nMax Leverage for ${symbol}: **${maxLeverage}x**\n\nSelect your leverage:`,
+              {
+                  parse_mode: 'Markdown',
+                  ...Markup.inlineKeyboard(leverageKeyboard)
+              }
+          );
+      } catch (error) {
+          session.tradingFlow = null; // Reset flow on error
+          userSessions.set(userId, session);
+          await ctx.reply(`❌ Error: ${error.message}`);
       }
-      
-      session.tradingFlow.size = size;
-      session.tradingFlow.step = 'enter_leverage';
-      userSessions.set(userId, session);
-      
-      const leverageKeyboard = [
-        [Markup.button.callback('2x', 'leverage_2'), Markup.button.callback('5x', 'leverage_5')],
-        [Markup.button.callback('10x', 'leverage_10'), Markup.button.callback('20x', 'leverage_20')],
-        [Markup.button.callback('50x', 'leverage_50'), Markup.button.callback('100x', 'leverage_100')]
-      ];
-      
-      await ctx.reply(
-        `Size: ${size} USDT\n\nSelect leverage:`,
-        Markup.inlineKeyboard(leverageKeyboard)
-      );
-    } catch (error) {
-      await ctx.reply(`Error: ${error.message}`);
-    }
   }
 });
 
@@ -491,7 +481,7 @@ bot.on('text', async (ctx) => {
 bot.catch((err, ctx) => {
   console.error('Bot error:', err);
   
-  // Send user-friendly error message
+  // Send bot.onuser-friendly error message
   let errorMessage = '❌ An unexpected error occurred. Please try again.';
   
   if (err.message.includes('Insufficient margin')) {
