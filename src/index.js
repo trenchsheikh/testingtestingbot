@@ -4,16 +4,19 @@ import { AsterAPI } from './asterdex.js';
 import { BNBWallet } from './bnb-wallet.js';
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const MAIN_WALLET_ADDRESS = process.env.MAIN_WALLET_ADDRESS;
+const API_WALLET_ADDRESS = process.env.API_WALLET_ADDRESS;
+const API_WALLET_PRIVATE_KEY = process.env.API_WALLET_PRIVATE_KEY;
 const ASTER_API_KEY = process.env.ASTER_API_KEY;
 const ASTER_API_SECRET = process.env.ASTER_API_SECRET;
 
-if (!BOT_TOKEN || !ASTER_API_KEY || !ASTER_API_SECRET) {
+if (!BOT_TOKEN || !MAIN_WALLET_ADDRESS || !API_WALLET_ADDRESS || !API_WALLET_PRIVATE_KEY || !ASTER_API_KEY || !ASTER_API_SECRET) {
   console.error('Missing required environment variables in .env');
   process.exit(1);
 }
 
 const bot = new Telegraf(BOT_TOKEN);
-const asterAPI = new AsterAPI(ASTER_API_KEY, ASTER_API_SECRET);
+const asterAPI = new AsterAPI(MAIN_WALLET_ADDRESS, API_WALLET_ADDRESS, API_WALLET_PRIVATE_KEY, ASTER_API_KEY, ASTER_API_SECRET);
 const bnbWallet = new BNBWallet();
 
 // User session storage
@@ -77,7 +80,7 @@ bot.help(async (ctx) => {
 
 **Wallet & Balance:**
 /balance - Check BNB and trading balances
-/deposit [amount|all] - Deposit BNB to trading account
+/transfer [amount] [asset] - Transfer from wallet to futures
 /export - Export wallet keys
 
 **Trading:**
@@ -115,14 +118,25 @@ bot.command('balance', async (ctx) => {
     // Get trading account balance from AsterDex
     const tradingBalance = await asterAPI.getAccountBalance();
     
+    // Get spot account balance
+    let spotBalance = 'Unable to fetch';
+    try {
+      const spotResponse = await asterAPI.getSpotAccountBalance();
+      spotBalance = spotResponse.USDT || '0';
+    } catch (error) {
+      console.log('Could not fetch spot balance:', error.message);
+    }
+    
     const balanceMessage = `
 💰 **Your Balances:**
 
 **BNB Wallet:** ${bnbBalance} BNB
-**Trading Account:** ${tradingBalance.available} USDT
+**AsterDex API Wallet:** 0x609b0bb89cf23b7b3f4b643808e61f7454f4d8e4
+**Spot Account:** ${spotBalance} USDT
+**Futures Account:** ${tradingBalance.available} USDT
 **Total Margin:** ${tradingBalance.total} USDT
 
-💡 Use /deposit to move BNB to your trading account
+💡 Use /transfer to move USDT from spot to futures
     `;
 
     await ctx.reply(balanceMessage, { parse_mode: 'Markdown' });
@@ -131,14 +145,15 @@ bot.command('balance', async (ctx) => {
   }
 });
 
-// Deposit command
-bot.command('deposit', async (ctx) => {
+// Transfer command - Transfer from spot to futures using v3 API
+bot.command('transfer', async (ctx) => {
   try {
     const args = ctx.message.text.split(' ');
     const amount = args[1];
+    const asset = args[2] || 'USDT';
     
     if (!amount) {
-      return ctx.reply('Usage: /deposit [amount|all]\nExample: /deposit 0.1 or /deposit all');
+      return ctx.reply('Usage: /transfer [amount] [asset]\nExample: /transfer 25 USDT');
     }
 
     const userId = ctx.from.id;
@@ -148,42 +163,31 @@ bot.command('deposit', async (ctx) => {
       return ctx.reply('Please use /start first to initialize your account.');
     }
 
-    let depositAmount;
-    if (amount === 'all') {
-      const balance = await bnbWallet.getBalance();
-      depositAmount = Math.max(0, balance - 0.005); // Keep 0.005 BNB for gas
-    } else {
-      depositAmount = parseFloat(amount);
-      if (isNaN(depositAmount) || depositAmount <= 0) {
-        return ctx.reply('Invalid amount. Please enter a valid number.');
-      }
+    const transferAmount = parseFloat(amount);
+    if (isNaN(transferAmount) || transferAmount <= 0) {
+      return ctx.reply('Invalid amount. Please enter a valid number.');
     }
 
-    if (depositAmount < 0.01) {
-      return ctx.reply('Minimum deposit is 0.01 BNB');
-    }
+    // Transfer from spot to futures using v3 API
+    const result = await asterAPI.transferSpotToFutures(asset, transferAmount);
+    
+    const transferMessage = `
+✅ **Transfer Successful!**
 
-    // Show deposit address and instructions
-    const depositMessage = `
-💳 **Deposit Instructions:**
+**Asset:** ${asset}
+**Amount:** ${transferAmount}
+**Transaction ID:** ${result.transactionId}
+**Status:** ${result.status}
 
-**Your BNB Address:** \`${session.walletAddress}\`
-
-**Amount to Deposit:** ${depositAmount} BNB
-
-**Steps:**
-1. Send ${depositAmount} BNB to the address above
-2. Wait for 1-2 confirmations
-3. Your funds will appear in your trading account
-
-⚠️ **Important:** Only send BNB to this address!
+Your funds are now available in your futures account for trading.
     `;
 
-    await ctx.reply(depositMessage, { parse_mode: 'Markdown' });
+    await ctx.reply(transferMessage, { parse_mode: 'Markdown' });
   } catch (error) {
-    await ctx.reply(`❌ Deposit processing failed: ${error.message}`);
+    await ctx.reply(`❌ Transfer failed: ${error.message}`);
   }
 });
+
 
 // Markets command
 bot.command('markets', async (ctx) => {

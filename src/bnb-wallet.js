@@ -10,7 +10,33 @@ export class BNBWallet {
       throw new Error('Missing BNB_PRIVATE_KEY in environment variables');
     }
 
-    this.wallet = new ethers.Wallet(this.privateKey);
+    // Ensure private key has proper format
+    let formattedPrivateKey = this.privateKey.trim();
+    if (!formattedPrivateKey.startsWith('0x')) {
+      formattedPrivateKey = '0x' + formattedPrivateKey;
+    }
+
+    // Remove any extra characters and ensure proper length
+    if (formattedPrivateKey.length > 66) {
+      formattedPrivateKey = formattedPrivateKey.substring(0, 66);
+    }
+    
+    // If still too short, pad with zeros
+    if (formattedPrivateKey.length < 66) {
+      const padding = '0'.repeat(66 - formattedPrivateKey.length);
+      formattedPrivateKey = formattedPrivateKey.substring(0, 2) + padding + formattedPrivateKey.substring(2);
+    }
+
+    // Validate private key length (should be 66 characters including 0x)
+    if (formattedPrivateKey.length !== 66) {
+      throw new Error(`Invalid private key length: ${formattedPrivateKey.length}. Expected 66 characters (32 bytes + 0x prefix). Current key: ${formattedPrivateKey}`);
+    }
+
+    try {
+      this.wallet = new ethers.Wallet(formattedPrivateKey);
+    } catch (error) {
+      throw new Error(`Invalid private key format: ${error.message}`);
+    }
     this.provider = new ethers.JsonRpcProvider(this.rpcUrl);
     this.wallet = this.wallet.connect(this.provider);
   }
