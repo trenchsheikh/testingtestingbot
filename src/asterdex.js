@@ -4,10 +4,10 @@ import { ethers } from 'ethers';
 
 export class AsterAPI {
     // Constructor now accepts all necessary credentials for both Spot and Futures v3 APIs
-    constructor(mainWalletAddress, apiWalletAddress, apiWalletPrivateKey, apiKey, apiSecret) {
-        this.mainWalletAddress = mainWalletAddress;
-        this.apiWalletAddress = apiWalletAddress;
-        this.apiWalletPrivateKey = apiWalletPrivateKey;
+    constructor( apiKey, apiSecret) {
+        // this.mainWalletAddress = mainWalletAddress;
+        // this.apiWalletAddress = apiWalletAddress;
+        // this.apiWalletPrivateKey = apiWalletPrivateKey;
         this.apiKey = apiKey; // For HMAC Spot API
         this.apiSecret = apiSecret; // For HMAC Spot API
 
@@ -34,72 +34,72 @@ export class AsterAPI {
     /**
      * Generates a Web3 signature for Futures v3 API requests.
      */
-    async generateV3Signature(businessParams) {
-        try {
-            console.log('🔐 Generating V3 signature with params:', businessParams);
+    // async generateV3Signature(businessParams) {
+    //     try {
+    //         console.log('🔐 Generating V3 signature with params:', businessParams);
             
-            const nonce = Math.trunc(Date.now() * 1000); // Microsecond timestamp
-            console.log('📅 Generated nonce:', nonce);
+    //         const nonce = Math.trunc(Date.now() * 1000); // Microsecond timestamp
+    //         console.log('📅 Generated nonce:', nonce);
 
-            // Clean and prepare parameters (remove null/undefined values)
-            const cleanParams = {};
-            for (const [key, value] of Object.entries(businessParams)) {
-                if (value !== null && value !== undefined) {
-                    cleanParams[key] = value;
-                }
-            }
+    //         // Clean and prepare parameters (remove null/undefined values)
+    //         const cleanParams = {};
+    //         for (const [key, value] of Object.entries(businessParams)) {
+    //             if (value !== null && value !== undefined) {
+    //                 cleanParams[key] = value;
+    //             }
+    //         }
 
-            // Add recvWindow and timestamp
-            cleanParams.recvWindow = 50000;
-            cleanParams.timestamp = Math.round(Date.now());
-            console.log('🧹 Cleaned params:', cleanParams);
+    //         // Add recvWindow and timestamp
+    //         cleanParams.recvWindow = 50000;
+    //         cleanParams.timestamp = Math.round(Date.now());
+    //         console.log('🧹 Cleaned params:', cleanParams);
 
-            // Convert all values to strings and sort alphabetically
-            const stringParams = {};
-            for (const [key, value] of Object.entries(cleanParams)) {
-                stringParams[key] = String(value);
-            }
+    //         // Convert all values to strings and sort alphabetically
+    //         const stringParams = {};
+    //         for (const [key, value] of Object.entries(cleanParams)) {
+    //             stringParams[key] = String(value);
+    //         }
 
-            // Create JSON string with sorted keys
-            const sortedParams = {};
-            Object.keys(stringParams).sort().forEach(key => {
-                sortedParams[key] = stringParams[key];
-            });
-            const jsonString = JSON.stringify(sortedParams);
-            console.log('📝 JSON string for signing:', jsonString);
+    //         // Create JSON string with sorted keys
+    //         const sortedParams = {};
+    //         Object.keys(stringParams).sort().forEach(key => {
+    //             sortedParams[key] = stringParams[key];
+    //         });
+    //         const jsonString = JSON.stringify(sortedParams);
+    //         console.log('📝 JSON string for signing:', jsonString);
 
-            // ABI encode the parameters: [string, address, address, uint256]
-            const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
-                ['string', 'address', 'address', 'uint256'],
-                [jsonString, this.mainWalletAddress, this.apiWalletAddress, nonce]
-            );
-            console.log('🔢 Encoded data:', encoded);
+    //         // ABI encode the parameters: [string, address, address, uint256]
+    //         const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
+    //             ['string', 'address', 'address', 'uint256'],
+    //             [jsonString, this.mainWalletAddress, this.apiWalletAddress, nonce]
+    //         );
+    //         console.log('🔢 Encoded data:', encoded);
 
-            // Generate Keccak hash
-            const keccakHash = ethers.keccak256(encoded);
-            console.log('🔐 Keccak hash:', keccakHash);
+    //         // Generate Keccak hash
+    //         const keccakHash = ethers.keccak256(encoded);
+    //         console.log('🔐 Keccak hash:', keccakHash);
 
-            // Sign the hash with the API wallet's private key
-            const wallet = new ethers.Wallet(this.apiWalletPrivateKey);
-            const signature = wallet.signingKey.sign(keccakHash).serialized;
-            console.log('✍️ Generated signature:', signature);
+    //         // Sign the hash with the API wallet's private key
+    //         const wallet = new ethers.Wallet(this.apiWalletPrivateKey);
+    //         const signature = wallet.signingKey.sign(keccakHash).serialized;
+    //         console.log('✍️ Generated signature:', signature);
 
-            // Return the full authentication payload
-            const authPayload = {
-                user: this.mainWalletAddress,
-                signer: this.apiWalletAddress,
-                nonce: nonce.toString(),
-                signature: signature,
-            };
-            console.log('📦 Final auth payload:', authPayload);
+    //         // Return the full authentication payload
+    //         const authPayload = {
+    //             user: this.mainWalletAddress,
+    //             signer: this.apiWalletAddress,
+    //             nonce: nonce.toString(),
+    //             signature: signature,
+    //         };
+    //         console.log('📦 Final auth payload:', authPayload);
             
-            return authPayload;
-        } catch (error) {
-            console.error('❌ V3 Signature generation error:', error);
-            console.error('❌ Error stack:', error.stack);
-            throw new Error(`Failed to generate v3 signature: ${error.message}`);
-        }
-    }
+    //         return authPayload;
+    //     } catch (error) {
+    //         console.error('❌ V3 Signature generation error:', error);
+    //         console.error('❌ Error stack:', error.stack);
+    //         throw new Error(`Failed to generate v3 signature: ${error.message}`);
+    //     }
+    // }
     
     /**
      * Places a futures order using v1 API with leverage support.
@@ -366,31 +366,77 @@ export class AsterAPI {
     }
 
     // Get available markets
+    // src/asterdex.js
+
+    // Get available markets, categorized into Crypto and Stocks
+    // src/asterdex.js
+
+// src/asterdex.js
+    async getLeverageBrackets(symbol) {
+            try {
+                console.log(`🔧 Fetching leverage brackets for ${symbol}...`);
+                const params = {
+                    symbol: symbol,
+                    recvWindow: 5000,
+                    timestamp: Date.now()
+                };
+
+                const queryString = Object.keys(params).sort().map(key => `${key}=${params[key]}`).join('&');
+                const signature = this.generateHmacSignature(queryString);
+                const finalQueryString = `${queryString}&signature=${signature}`;
+
+                const response = await this.futuresClient.get(`/fapi/v1/leverageBracket?${finalQueryString}`, {
+                    headers: {
+                        'X-MBX-APIKEY': this.apiKey
+                    }
+                });
+
+                // The API returns bracket info for the symbol. The highest leverage is in the first bracket.
+                if (response.data && response.data.brackets && response.data.brackets.length > 0) {
+                    const maxLeverage = response.data.brackets[0].initialLeverage;
+                    console.log(`✅ Max leverage for ${symbol} is ${maxLeverage}x`);
+                    return maxLeverage;
+                }
+
+                // Fallback if data is not in the expected format
+                console.warn(`Could not determine max leverage for ${symbol}, falling back to 100.`);
+                return 100;
+            } catch (error) {
+                console.error(`❌ getLeverageBrackets error for ${symbol}:`, error.response?.data || error.message);
+                throw new Error(`Unable to fetch leverage data for ${symbol}.`);
+            }
+}
+
+    // Get available crypto markets
     async getMarkets() {
         try {
-            console.log('📈 Fetching available markets...');
+            console.log('📈 Fetching all available crypto markets...');
             const response = await this.futuresClient.get('/fapi/v1/exchangeInfo');
-            console.log('✅ Markets response status:', response.status);
-            console.log('📊 Total symbols available:', response.data.symbols?.length || 0);
             
-            const bnbMarkets = (response.data.symbols || [])
-                .filter(symbol => symbol.symbol.includes('BNB'))
-                .map(symbol => ({
-                    symbol: symbol.symbol,
-                    maxLeverage: symbol.maxLeverage || 100,
-                    status: symbol.status
-                }));
+            const allSymbols = response.data.symbols || [];
+            if (!Array.isArray(allSymbols)) {
+                throw new Error("Exchange info did not return a valid list of symbols.");
+            }
+
+            const cryptoMarkets = [];
+            const cryptoIdentifiers = ['USDT', 'BUSD', 'USDC', 'BTC', 'ETH'];
+
+            allSymbols.forEach(symbol => {
+                // Check if the symbol is a known crypto pair and is trading
+                if (cryptoIdentifiers.some(id => symbol.symbol.endsWith(id)) && symbol.status === 'TRADING') {
+                    cryptoMarkets.push({
+                        symbol: symbol.symbol,
+                        status: symbol.status
+                    });
+                }
+            });
             
-            console.log('📈 BNB markets found:', bnbMarkets.length);
-            console.log('📈 BNB markets:', bnbMarkets);
+            console.log(`📈 Crypto markets found: ${cryptoMarkets.length}`);
             
-            return bnbMarkets;
+            // Now returns a simple array of crypto markets
+            return cryptoMarkets;
         } catch (error) {
-            console.error('❌ getMarkets error:', error);
-            console.error('❌ Error response:', error.response?.data);
-            console.error('❌ Error status:', error.response?.status);
-            console.error('❌ Error headers:', error.response?.headers);
-            console.error('❌ Error stack:', error.stack);
+            console.error('❌ getMarkets error:', error.response?.data || error.message);
             throw new Error(`Unable to fetch market data: ${error.message}`);
         }
     }
