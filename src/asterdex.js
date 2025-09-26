@@ -102,14 +102,20 @@ export class AsterAPI {
     }
     
     /**
-     * Places a futures order. This now includes the critical price fetch and quantity calculation.
+     * Places a futures order using v1 API with leverage support.
      */
     async placeOrder(orderData) {
         try {
             console.log('📈 Placing order with data:', orderData);
-            const { symbol, side, size, type = 'MARKET', price = null } = orderData;
+            const { symbol, side, size, type = 'MARKET', price = null, leverage = 1 } = orderData;
 
-            // 1. Fetch exchange info to get quantity precision
+            // 1. Set leverage first if provided
+            if (leverage && leverage > 1) {
+                console.log('⚡ Setting leverage to:', leverage);
+                await this.setLeverage(symbol, leverage);
+            }
+
+            // 2. Fetch exchange info to get quantity precision
             console.log('🔍 Fetching exchange info for symbol:', symbol);
             const exchangeInfoResponse = await this.futuresClient.get('/fapi/v1/exchangeInfo');
             const symbolInfo = exchangeInfoResponse.data.symbols.find(s => s.symbol === symbol);
@@ -118,7 +124,7 @@ export class AsterAPI {
 
             let quantity;
             if (type === 'MARKET') {
-                // 2. Fetch the current price of the asset for market orders
+                // 3. Fetch the current price of the asset for market orders
                 console.log('💰 Fetching current price for', symbol);
                 const priceResponse = await this.futuresClient.get('/fapi/v1/ticker/price', { params: { symbol } });
                 const currentPrice = parseFloat(priceResponse.data.price);
@@ -127,7 +133,7 @@ export class AsterAPI {
                 if (!currentPrice || currentPrice <= 0) {
                     throw new Error(`Could not fetch a valid price for ${symbol}`);
                 }
-                // 3. Calculate the quantity in the base asset from the size in USDT
+                // 4. Calculate the quantity in the base asset from the size in USDT
                 quantity = size / currentPrice;
                 console.log('📊 Calculated quantity:', quantity);
             } else {
@@ -139,46 +145,49 @@ export class AsterAPI {
                 console.log('📊 Calculated quantity for limit order:', quantity);
             }
 
-            // 4. Prepare the business parameters for the order
-            const businessParams = {
+            // 5. Prepare the parameters for the v1 order
+            const params = {
                 symbol: symbol,
                 side: side === 'long' ? 'BUY' : 'SELL',
-                positionSide: 'BOTH',
                 type: type,
-                quantity: quantity.toFixed(quantityPrecision), // Use dynamic precision from exchange info
+                quantity: quantity.toFixed(quantityPrecision),
                 recvWindow: 5000,
-                timestamp: (Date.now() - 1000).toString()
+                timestamp: Date.now()
             };
 
             // Add price for limit orders
             if (type === 'LIMIT') {
-                businessParams.price = price.toFixed(6);
-                businessParams.timeInForce = 'GTC';
+                params.price = price.toFixed(6);
+                params.timeInForce = 'GTC';
             }
 
-            console.log('📋 Business params:', businessParams);
+            console.log('📋 Order params:', params);
 
-            // 5. Generate the v3 signature payload
-            const authPayload = await this.generateV3Signature(businessParams);
+            // 6. Generate HMAC signature for v1 API
+            const queryString = Object.keys(params).sort().map(key => `${key}=${params[key]}`).join('&');
+            const signature = this.generateHmacSignature(queryString);
+            const finalQueryString = `${queryString}&signature=${signature}`;
 
-            // 6. Combine business and auth params for the final request
-            const requestParams = { ...businessParams, ...authPayload };
-            console.log('📤 Final request params:', requestParams);
-
-            const formData = new URLSearchParams();
-            for (const key in requestParams) {
-                formData.append(key, requestParams[key]);
-            }
-
-            console.log('🌐 Making POST request to /fapi/v3/order');
-            const response = await this.futuresClient.post('/fapi/v3/order', formData, {
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+            console.log('🌐 Making POST request to /fapi/v1/order');
+            const response = await this.futuresClient.post(`/fapi/v1/order?${finalQueryString}`, null, {
+                headers: {
+                    'X-MBX-APIKEY': this.apiKey,
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                }
             });
             
             console.log('✅ Order response status:', response.status);
             console.log('📊 Order response data:', response.data);
             
-            return response.data;
+            return {
+                orderId: response.data.orderId,
+                symbol: response.data.symbol,
+                side: response.data.side,
+                quantity: response.data.origQty,
+                price: response.data.price,
+                status: response.data.status,
+                leverage: leverage
+            };
 
         } catch (error) {
             console.error('❌ placeOrder error:', error);
@@ -187,6 +196,43 @@ export class AsterAPI {
             console.error('❌ Error headers:', error.response?.headers);
             console.error('❌ Error stack:', error.stack);
             throw new Error(`Unable to place order: ${error.message}`);
+        }
+    }
+
+    /**
+     * Sets leverage for a symbol using v1 API.
+     */
+    async setLeverage(symbol, leverage) {
+        try {
+            console.log('⚡ Setting leverage for', symbol, 'to', leverage);
+            
+            const params = {
+                symbol: symbol,
+                leverage: leverage,
+                recvWindow: 5000,
+                timestamp: Date.now()
+            };
+
+            const queryString = Object.keys(params).sort().map(key => `${key}=${params[key]}`).join('&');
+            const signature = this.generateHmacSignature(queryString);
+            const finalQueryString = `${queryString}&signature=${signature}`;
+
+            console.log('🌐 Making POST request to /fapi/v1/leverage');
+            const response = await this.futuresClient.post(`/fapi/v1/leverage?${finalQueryString}`, null, {
+                headers: {
+                    'X-MBX-APIKEY': this.apiKey,
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                }
+            });
+            
+            console.log('✅ Leverage response status:', response.status);
+            console.log('📊 Leverage response data:', response.data);
+            
+            return response.data;
+        } catch (error) {
+            console.error('❌ setLeverage error:', error);
+            console.error('❌ Error response:', error.response?.data);
+            throw new Error(`Unable to set leverage: ${error.message}`);
         }
     }
 
@@ -226,20 +272,26 @@ export class AsterAPI {
         }
     }
 
-    // Get account balance (Futures API)
+    // Get account balance (Futures API v1)
     async getAccountBalance() {
         try {
             console.log('💰 Fetching account balance...');
-            const businessParams = {};
-            console.log('📋 Business params:', businessParams);
+            const params = {
+                recvWindow: 5000,
+                timestamp: Date.now()
+            };
+            console.log('📋 Balance params:', params);
             
-            const authPayload = await this.generateV3Signature(businessParams);
-            const requestParams = { ...businessParams, ...authPayload };
-            console.log('📤 Request params:', requestParams);
+            const queryString = Object.keys(params).sort().map(key => `${key}=${params[key]}`).join('&');
+            const signature = this.generateHmacSignature(queryString);
+            const finalQueryString = `${queryString}&signature=${signature}`;
             
             console.log('🌐 Making GET request to /fapi/v2/balance');
-            const response = await this.futuresClient.get('/fapi/v2/balance', {
-                params: requestParams
+            const response = await this.futuresClient.get(`/fapi/v2/balance?${finalQueryString}`, {
+                headers: {
+                    'X-MBX-APIKEY': this.apiKey,
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                }
             });
             
             console.log('✅ Balance response status:', response.status);
@@ -393,22 +445,28 @@ export class AsterAPI {
         }
     }
 
-    // Get user positions
+    // Get user positions (Futures API v1)
     async getPositions(symbol = null) {
         try {
             console.log('📊 Fetching positions for symbol:', symbol || 'all');
-            const businessParams = {};
+            const params = {
+                recvWindow: 5000,
+                timestamp: Date.now()
+            };
             
-            if (symbol) businessParams.symbol = symbol;
-            console.log('📋 Business params:', businessParams);
+            if (symbol) params.symbol = symbol;
+            console.log('📋 Position params:', params);
             
-            const authPayload = await this.generateV3Signature(businessParams);
-            const requestParams = { ...businessParams, ...authPayload };
-            console.log('📤 Request params:', requestParams);
+            const queryString = Object.keys(params).sort().map(key => `${key}=${params[key]}`).join('&');
+            const signature = this.generateHmacSignature(queryString);
+            const finalQueryString = `${queryString}&signature=${signature}`;
             
             console.log('🌐 Making GET request to /fapi/v2/positionRisk');
-            const response = await this.futuresClient.get('/fapi/v2/positionRisk', {
-                params: requestParams
+            const response = await this.futuresClient.get(`/fapi/v2/positionRisk?${finalQueryString}`, {
+                headers: {
+                    'X-MBX-APIKEY': this.apiKey,
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                }
             });
             
             console.log('✅ Positions response status:', response.status);
@@ -438,7 +496,7 @@ export class AsterAPI {
         }
     }
 
-    // Close position
+    // Close position (Futures API v1)
     async closePosition(positionId) {
         try {
             console.log('🔒 Closing position for:', positionId);
