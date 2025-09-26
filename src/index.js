@@ -66,7 +66,7 @@ Ready to trade? Let's go! 🎯
 
     await ctx.reply(welcomeMessage, { parse_mode: 'Markdown' });
   } catch (error) {
-    await ctx.reply(`Error initializing account: ${error.message}`);
+    await ctx.reply(`❌ Account initialization failed: ${error.message}`);
   }
 });
 
@@ -127,7 +127,7 @@ bot.command('balance', async (ctx) => {
 
     await ctx.reply(balanceMessage, { parse_mode: 'Markdown' });
   } catch (error) {
-    await ctx.reply(`Error getting balance: ${error.message}`);
+    await ctx.reply(`❌ Unable to fetch balance: ${error.message}`);
   }
 });
 
@@ -181,7 +181,7 @@ bot.command('deposit', async (ctx) => {
 
     await ctx.reply(depositMessage, { parse_mode: 'Markdown' });
   } catch (error) {
-    await ctx.reply(`Error processing deposit: ${error.message}`);
+    await ctx.reply(`❌ Deposit processing failed: ${error.message}`);
   }
 });
 
@@ -200,7 +200,7 @@ bot.command('markets', async (ctx) => {
     
     await ctx.reply(marketList, { parse_mode: 'Markdown' });
   } catch (error) {
-    await ctx.reply(`Error fetching markets: ${error.message}`);
+    await ctx.reply(`❌ Unable to fetch markets: ${error.message}`);
   }
 });
 
@@ -219,7 +219,7 @@ bot.command('debug', async (ctx) => {
     
     await ctx.reply(debugInfo, { parse_mode: 'Markdown' });
   } catch (error) {
-    await ctx.reply(`Debug error: ${error.message}`);
+    await ctx.reply(`❌ Debug failed: ${error.message}`);
   }
 });
 
@@ -243,7 +243,7 @@ bot.command('price', async (ctx) => {
     
     await ctx.reply(priceMessage, { parse_mode: 'Markdown' });
   } catch (error) {
-    await ctx.reply(`Error getting price: ${error.message}`);
+    await ctx.reply(`❌ Unable to fetch price: ${error.message}`);
   }
 });
 
@@ -273,7 +273,7 @@ bot.command('long', async (ctx) => {
       Markup.inlineKeyboard(keyboard)
     );
   } catch (error) {
-    await ctx.reply(`Error starting long position: ${error.message}`);
+    await ctx.reply(`❌ Unable to start long position: ${error.message}`);
   }
 });
 
@@ -303,7 +303,7 @@ bot.command('short', async (ctx) => {
       Markup.inlineKeyboard(keyboard)
     );
   } catch (error) {
-    await ctx.reply(`Error starting short position: ${error.message}`);
+    await ctx.reply(`❌ Unable to start short position: ${error.message}`);
   }
 });
 
@@ -333,7 +333,7 @@ bot.command('positions', async (ctx) => {
     
     await ctx.reply(positionsList, { parse_mode: 'Markdown' });
   } catch (error) {
-    await ctx.reply(`Error fetching positions: ${error.message}`);
+    await ctx.reply(`❌ Unable to fetch positions: ${error.message}`);
   }
 });
 
@@ -355,7 +355,7 @@ bot.command('close', async (ctx) => {
       Markup.inlineKeyboard(keyboard)
     );
   } catch (error) {
-    await ctx.reply(`Error fetching positions: ${error.message}`);
+    await ctx.reply(`❌ Unable to fetch positions: ${error.message}`);
   }
 });
 
@@ -384,6 +384,65 @@ bot.on('callback_query', async (ctx) => {
       
       await ctx.answerCbQuery();
       await ctx.editMessageText('✅ Position closed successfully!');
+    }
+    
+    // Handle leverage selection
+    if (data.startsWith('leverage_') && session?.tradingFlow?.step === 'enter_leverage') {
+      const leverage = parseInt(data.replace('leverage_', ''));
+      session.tradingFlow.leverage = leverage;
+      session.tradingFlow.step = 'confirm';
+      userSessions.set(userId, session);
+      
+      const { type, asset, size } = session.tradingFlow;
+      const side = type === 'long' ? 'Long' : 'Short';
+      
+      const confirmKeyboard = [
+        [Markup.button.callback('✅ Confirm Trade', 'confirm_trade')],
+        [Markup.button.callback('❌ Cancel', 'cancel_trade')]
+      ];
+      
+      await ctx.answerCbQuery();
+      await ctx.editMessageText(
+        `📋 **Trade Confirmation:**\n\n` +
+        `Asset: ${asset}\n` +
+        `Side: ${side}\n` +
+        `Size: ${size} USDT\n` +
+        `Leverage: ${leverage}x\n\n` +
+        `Confirm this trade?`,
+        Markup.inlineKeyboard(confirmKeyboard)
+      );
+    }
+    
+    if (data === 'confirm_trade' && session?.tradingFlow?.step === 'confirm') {
+      const { type, asset, size, leverage } = session.tradingFlow;
+      
+      const result = await asterAPI.placeOrder({
+        symbol: asset,
+        side: type,
+        size: size,
+        leverage: leverage
+      });
+      
+      session.tradingFlow = null;
+      userSessions.set(userId, session);
+      
+      await ctx.answerCbQuery();
+      await ctx.editMessageText(
+        `✅ **Trade Executed!**\n\n` +
+        `Order ID: ${result.orderId}\n` +
+        `Asset: ${asset}\n` +
+        `Side: ${type}\n` +
+        `Size: ${size} USDT\n` +
+        `Leverage: ${leverage}x`
+      );
+    }
+    
+    if (data === 'cancel_trade') {
+      session.tradingFlow = null;
+      userSessions.set(userId, session);
+      
+      await ctx.answerCbQuery();
+      await ctx.editMessageText('❌ Trade cancelled.');
     }
   } catch (error) {
     await ctx.answerCbQuery();
@@ -423,85 +482,27 @@ bot.on('text', async (ctx) => {
   }
 });
 
-// Handle leverage selection
-bot.on('callback_query', async (ctx) => {
-  const data = ctx.callbackQuery.data;
-  const userId = ctx.from.id;
-  const session = userSessions.get(userId);
-  
-  if (data.startsWith('leverage_') && session?.tradingFlow?.step === 'enter_leverage') {
-    try {
-      const leverage = parseInt(data.replace('leverage_', ''));
-      session.tradingFlow.leverage = leverage;
-      session.tradingFlow.step = 'confirm';
-      userSessions.set(userId, session);
-      
-      const { type, asset, size } = session.tradingFlow;
-      const side = type === 'long' ? 'Long' : 'Short';
-      
-      const confirmKeyboard = [
-        [Markup.button.callback('✅ Confirm Trade', 'confirm_trade')],
-        [Markup.button.callback('❌ Cancel', 'cancel_trade')]
-      ];
-      
-      await ctx.answerCbQuery();
-      await ctx.editMessageText(
-        `📋 **Trade Confirmation:**\n\n` +
-        `Asset: ${asset}\n` +
-        `Side: ${side}\n` +
-        `Size: ${size} USDT\n` +
-        `Leverage: ${leverage}x\n\n` +
-        `Confirm this trade?`,
-        Markup.inlineKeyboard(confirmKeyboard)
-      );
-    } catch (error) {
-      await ctx.answerCbQuery();
-      await ctx.reply(`Error: ${error.message}`);
-    }
-  }
-  
-  if (data === 'confirm_trade' && session?.tradingFlow?.step === 'confirm') {
-    try {
-      const { type, asset, size, leverage } = session.tradingFlow;
-      
-      const result = await asterAPI.placeOrder({
-        symbol: asset,
-        side: type,
-        size: size,
-        leverage: leverage
-      });
-      
-      session.tradingFlow = null;
-      userSessions.set(userId, session);
-      
-      await ctx.answerCbQuery();
-      await ctx.editMessageText(
-        `✅ **Trade Executed!**\n\n` +
-        `Order ID: ${result.orderId}\n` +
-        `Asset: ${asset}\n` +
-        `Side: ${type}\n` +
-        `Size: ${size} USDT\n` +
-        `Leverage: ${leverage}x`
-      );
-    } catch (error) {
-      await ctx.answerCbQuery();
-      await ctx.editMessageText(`❌ Trade failed: ${error.message}`);
-    }
-  }
-  
-  if (data === 'cancel_trade') {
-    session.tradingFlow = null;
-    userSessions.set(userId, session);
-    
-    await ctx.answerCbQuery();
-    await ctx.editMessageText('❌ Trade cancelled.');
-  }
-});
 
 // Error handling
 bot.catch((err, ctx) => {
   console.error('Bot error:', err);
-  ctx.reply('An error occurred. Please try again.');
+  
+  // Send user-friendly error message
+  let errorMessage = '❌ An unexpected error occurred. Please try again.';
+  
+  if (err.message.includes('Insufficient margin')) {
+    errorMessage = '💰 Insufficient margin. Please deposit more funds to your trading account using /deposit';
+  } else if (err.message.includes('Invalid API signature')) {
+    errorMessage = '🔑 API authentication failed. Please check your API credentials in the .env file';
+  } else if (err.message.includes('Connection error')) {
+    errorMessage = '🌐 Connection error. Please check your internet connection and try again';
+  } else if (err.message.includes('Trading pair')) {
+    errorMessage = '📈 ' + err.message;
+  } else if (err.message.includes('Unable to')) {
+    errorMessage = '⚠️ ' + err.message;
+  }
+  
+  ctx.reply(errorMessage);
 });
 
 // Launch bot

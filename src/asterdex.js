@@ -12,7 +12,7 @@ export class AsterAPI {
     });
   }
 
-  // Generate signature for API requests (AsterDex format)
+  // Generate signature for API requests (Binance/AsterDex format)
   generateSignature(queryString) {
     return crypto.createHmac('sha256', this.apiSecret).update(queryString).digest('hex');
   }
@@ -21,37 +21,86 @@ export class AsterAPI {
   async makeRequest(method, endpoint, data = null) {
     const timestamp = Date.now();
     
-    // Build query string for signature
-    let queryString = `timestamp=${timestamp}`;
-    if (data && method === 'GET') {
-      const params = new URLSearchParams(data);
-      queryString += `&${params.toString()}`;
+    // Build parameters object for signature (exactly as per AsterDex docs)
+    const params = { timestamp: timestamp.toString() };
+    if (data) {
+      Object.keys(data).forEach(key => {
+        params[key] = data[key].toString();
+      });
     }
     
-    // Generate signature
-    const signature = this.generateSignature(queryString);
+    // Sort parameters alphabetically for signature (Binance/AsterDex standard)
+    const sortedParams = Object.keys(params)
+      .sort()
+      .map(key => `${key}=${params[key]}`)
+      .join('&');
     
-    // Add signature to query string
-    const finalQueryString = `${queryString}&signature=${signature}`;
+    // Generate signature from sorted parameters
+    const signature = this.generateSignature(sortedParams);
     
     const headers = {
       'X-MBX-APIKEY': this.apiKey,
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/x-www-form-urlencoded'
     };
 
     try {
-      const url = method === 'GET' ? `${endpoint}?${finalQueryString}` : endpoint;
+      let url, requestData;
+      
+      if (method === 'GET') {
+        // For GET requests, add timestamp and signature to URL
+        const finalQueryString = `${sortedParams}&signature=${signature}`;
+        url = `${endpoint}?${finalQueryString}`;
+        requestData = undefined;
+      } else {
+        // For POST requests, send parameters in request body as per AsterDex docs
+        url = endpoint;
+        
+        // Create form data in the SAME order as sorted parameters for signature
+        const formData = new URLSearchParams();
+        
+        // Add parameters in sorted order (same as signature generation)
+        const sortedKeys = Object.keys(params).sort();
+        sortedKeys.forEach(key => {
+          formData.append(key, params[key]);
+        });
+        formData.append('signature', signature);
+        
+        requestData = formData;
+      }
       
       const response = await this.client.request({
         method,
         url,
-        data: method !== 'GET' ? data : undefined,
+        data: requestData,
         headers
       });
       return response.data;
     } catch (error) {
-      console.error('API Error:', error.response?.data || error.message);
-      throw new Error(`API Error: ${error.response?.data?.message || error.message}`);
+      // Handle specific API errors with user-friendly messages
+      const apiError = error.response?.data;
+      if (apiError) {
+        switch (apiError.code) {
+          case -1022:
+            throw new Error('Invalid API signature. Please check your API credentials.');
+          case -1102:
+            throw new Error('Missing required parameters. Please try again.');
+          case -1106:
+            throw new Error('Invalid parameter sent. Please try again.');
+          case -2019:
+            throw new Error('Insufficient margin. Please deposit more funds to your trading account.');
+          case -2018:
+            throw new Error('Insufficient balance. Please check your account balance.');
+          case -1121:
+            throw new Error('Invalid trading pair. Please select a valid symbol.');
+          case -1002:
+            throw new Error('Unauthorized. Please check your API key permissions.');
+          case -1003:
+            throw new Error('Too many requests. Please wait a moment and try again.');
+          default:
+            throw new Error(`Trading error: ${apiError.msg || 'Unknown error occurred'}`);
+        }
+      }
+      throw new Error(`Connection error: ${error.message}`);
     }
   }
 
@@ -65,7 +114,7 @@ export class AsterAPI {
         margin: response.totalMarginBalance || 0
       };
     } catch (error) {
-      throw new Error(`Failed to get balance: ${error.message}`);
+      throw new Error(`Unable to fetch account balance: ${error.message}`);
     }
   }
 
@@ -83,17 +132,17 @@ export class AsterAPI {
         }));
       return bnbMarkets;
     } catch (error) {
-      throw new Error(`Failed to get markets: ${error.message}`);
+      throw new Error(`Unable to fetch market data: ${error.message}`);
     }
   }
 
-  // Get all available symbols (for debugging)
+  // Get all available symbols
   async getAllSymbols() {
     try {
       const response = await this.makeRequest('GET', '/fapi/v1/exchangeInfo');
       return (response.symbols || []).map(s => s.symbol);
     } catch (error) {
-      throw new Error(`Failed to get symbols: ${error.message}`);
+      throw new Error(`Unable to fetch trading symbols: ${error.message}`);
     }
   }
 
@@ -110,7 +159,7 @@ export class AsterAPI {
       );
       
       if (!matchingSymbol) {
-        throw new Error(`Symbol ${symbol} not found. Available symbols: ${availableSymbols.slice(0, 5).map(s => s.symbol).join(', ')}...`);
+        throw new Error(`Trading pair "${symbol}" not found. Please check the symbol name.`);
       }
       
       const response = await this.makeRequest('GET', '/fapi/v1/ticker/24hr', { symbol: matchingSymbol.symbol });
@@ -122,7 +171,7 @@ export class AsterAPI {
         volume24h: parseFloat(response.volume) || 0
       };
     } catch (error) {
-      throw new Error(`Failed to get price: ${error.message}`);
+      throw new Error(`Unable to fetch price for ${symbol}: ${error.message}`);
     }
   }
 
@@ -147,7 +196,7 @@ export class AsterAPI {
       
       return positions;
     } catch (error) {
-      throw new Error(`Failed to get positions: ${error.message}`);
+      throw new Error(`Unable to fetch positions: ${error.message}`);
     }
   }
 
@@ -160,8 +209,8 @@ export class AsterAPI {
         symbol,
         side: side === 'long' ? 'BUY' : 'SELL',
         type: 'MARKET',
-        quantity: size,
-        timeInForce: 'GTC'
+        quantity: size
+        // timeInForce is not required for MARKET orders per AsterDex docs
       };
 
       const response = await this.makeRequest('POST', '/fapi/v1/order', order);
@@ -174,7 +223,7 @@ export class AsterAPI {
         leverage
       };
     } catch (error) {
-      throw new Error(`Failed to place order: ${error.message}`);
+      throw new Error(`Unable to place order: ${error.message}`);
     }
   }
 
@@ -191,7 +240,7 @@ export class AsterAPI {
       });
       return response;
     } catch (error) {
-      throw new Error(`Failed to close position: ${error.message}`);
+      throw new Error(`Unable to close position: ${error.message}`);
     }
   }
 
