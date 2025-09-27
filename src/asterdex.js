@@ -22,101 +22,23 @@ export class AsterAPI {
         return crypto.createHmac('sha256', apiSecret).update(queryString).digest('hex');
     }
 
-    /**
-     * Generates a Web3 signature for Futures v3 API requests.
-     */
-    // async generateV3Signature(businessParams) {
-    //     try {
-    //         console.log('🔐 Generating V3 signature with params:', businessParams);
-            
-    //         const nonce = Math.trunc(Date.now() * 1000); // Microsecond timestamp
-    //         console.log('📅 Generated nonce:', nonce);
-
-    //         // Clean and prepare parameters (remove null/undefined values)
-    //         const cleanParams = {};
-    //         for (const [key, value] of Object.entries(businessParams)) {
-    //             if (value !== null && value !== undefined) {
-    //                 cleanParams[key] = value;
-    //             }
-    //         }
-
-    //         // Add recvWindow and timestamp
-    //         cleanParams.recvWindow = 50000;
-    //         cleanParams.timestamp = Math.round(Date.now());
-    //         console.log('🧹 Cleaned params:', cleanParams);
-
-    //         // Convert all values to strings and sort alphabetically
-    //         const stringParams = {};
-    //         for (const [key, value] of Object.entries(cleanParams)) {
-    //             stringParams[key] = String(value);
-    //         }
-
-    //         // Create JSON string with sorted keys
-    //         const sortedParams = {};
-    //         Object.keys(stringParams).sort().forEach(key => {
-    //             sortedParams[key] = stringParams[key];
-    //         });
-    //         const jsonString = JSON.stringify(sortedParams);
-    //         console.log('📝 JSON string for signing:', jsonString);
-
-    //         // ABI encode the parameters: [string, address, address, uint256]
-    //         const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
-    //             ['string', 'address', 'address', 'uint256'],
-    //             [jsonString, this.mainWalletAddress, this.apiWalletAddress, nonce]
-    //         );
-    //         console.log('🔢 Encoded data:', encoded);
-
-    //         // Generate Keccak hash
-    //         const keccakHash = ethers.keccak256(encoded);
-    //         console.log('🔐 Keccak hash:', keccakHash);
-
-    //         // Sign the hash with the API wallet's private key
-    //         const wallet = new ethers.Wallet(this.apiWalletPrivateKey);
-    //         const signature = wallet.signingKey.sign(keccakHash).serialized;
-    //         console.log('✍️ Generated signature:', signature);
-
-    //         // Return the full authentication payload
-    //         const authPayload = {
-    //             user: this.mainWalletAddress,
-    //             signer: this.apiWalletAddress,
-    //             nonce: nonce.toString(),
-    //             signature: signature,
-    //         };
-    //         console.log('📦 Final auth payload:', authPayload);
-            
-    //         return authPayload;
-    //     } catch (error) {
-    //         console.error('❌ V3 Signature generation error:', error);
-    //         console.error('❌ Error stack:', error.stack);
-    //         throw new Error(`Failed to generate v3 signature: ${error.message}`);
-    //     }
-    // }
     
     /**
      * Places a futures order using v1 API with leverage support.
      */
-    
-    // src/asterdex.js
 
     // --- NEW FUNCTION FOR CREATING API KEYS ---
-    // REPLACE this entire function in src/asterdex.js
-
-// REPLACE this entire function in src/asterdex.js
 
     async createApiKeysForWallet(wallet) {
         try {
-            console.log(`🚀 [DEBUG] Starting API key generation for: ${wallet.address}`);
 
             // --- THIS IS THE CORRECTED SECTION ---
             // 1. Get Nonce using a properly formatted POST request
-            console.log('🔍 [DEBUG] Preparing nonce request...');
             const nonceParams = new URLSearchParams({
                 address: wallet.address,
                 userOperationType: 'CREATE_API_KEY'
             }).toString();
-            console.log('📤 [DEBUG] Nonce params:', nonceParams);
 
-            console.log('🌐 [DEBUG] Making nonce request to /api/v1/getNonce...');
             const nonceResponse = await this.spotClient.post(
                 '/api/v1/getNonce',
                 nonceParams,
@@ -276,13 +198,15 @@ export class AsterAPI {
             
             // Provide more helpful error messages
             if (errorMsg.includes('not supported symbol') || error.response?.data?.code === -4095) {
-                throw new Error(`❌ Symbol ${orderData.symbol} is not supported for trading. Please try a different symbol.`);
-            } else if (errorMsg.includes('insufficient balance') || errorMsg.includes('margin')) {
-                throw new Error(`❌ Insufficient balance. Please deposit more USDT to your account.`);
+                throw new Error(`❌ **Trading Pair Not Supported**\n${orderData.symbol} is not available for trading. Please try a different symbol.`);
+            } else if (errorMsg.includes('insufficient balance') || errorMsg.includes('margin') || errorMsg.includes('balance')) {
+                throw new Error(`❌ **Empty Futures Account!**\nYou have no USDT in your futures account to trade with.\n\n**To fix this:**\n1. Use /deposit to add USDT to your futures account\n2. Or transfer from spot using the Transfer button`);
             } else if (errorMsg.includes('leverage')) {
-                throw new Error(`❌ Invalid leverage for ${orderData.symbol}. Please try a lower leverage.`);
+                throw new Error(`❌ **Invalid Leverage**\nThe leverage amount is too high for ${orderData.symbol}. Please try a lower leverage (1x-10x).`);
+            } else if (errorMsg.includes('quantity') || errorMsg.includes('size')) {
+                throw new Error(`❌ **Position Size Too Large**\nYour position size exceeds your available balance or trading limits.\n\n**Try:**\n• Smaller position size\n• Check your futures balance with /balance`);
             } else {
-                throw new Error(`❌ Order failed: ${errorMsg}`);
+                throw new Error(`❌ **Trading Error**\n${errorMsg}\n\nPlease check your balance and try again.`);
             }
         }
     }
@@ -364,26 +288,15 @@ export class AsterAPI {
     // Get account balance (Futures API v1)
     async getAccountBalance(apiKey, apiSecret) {
         try {
-            console.log('💰 [DEBUG] Fetching account balance...');
-            console.log('🔑 [DEBUG] API Key provided:', !!apiKey);
-            console.log('🔑 [DEBUG] API Secret provided:', !!apiSecret);
             
             const params = {
                 recvWindow: 5000,
                 timestamp: Date.now()
             };
-            console.log('📋 [DEBUG] Balance params:', params);
             
             const queryString = Object.keys(params).sort().map(key => `${key}=${params[key]}`).join('&');
-            console.log('🔗 [DEBUG] Query string:', queryString);
-            
             const signature = this.generateHmacSignature(queryString, apiSecret);
-            console.log('🔐 [DEBUG] Generated signature:', signature.substring(0, 10) + '...');
-            
             const finalQueryString = `${queryString}&signature=${signature}`;
-            console.log('📤 [DEBUG] Final query string length:', finalQueryString.length);
-            
-            console.log('🌐 [DEBUG] Making GET request to /fapi/v2/balance...');
             const response = await this.futuresClient.get(`/fapi/v2/balance?${finalQueryString}`, {
                 headers: {
                     'X-MBX-APIKEY': apiKey,
@@ -391,18 +304,12 @@ export class AsterAPI {
                 }
             });
             
-            console.log('✅ [DEBUG] Balance response status:', response.status);
-            console.log('📊 [DEBUG] Balance response data type:', typeof response.data);
-            console.log('📊 [DEBUG] Balance response data length:', Array.isArray(response.data) ? response.data.length : 'not array');
             
             const usdtBalance = response.data.find(asset => asset.asset === 'USDT');
-            console.log('💎 [DEBUG] USDT balance found:', !!usdtBalance);
-            
             const result = {
                 available: parseFloat(usdtBalance?.availableBalance || 0).toFixed(2),
                 total: parseFloat(usdtBalance?.balance || 0).toFixed(2),
             };
-            console.log('✅ [DEBUG] Final balance result:', result);
             return result;
         } catch (error) {
             console.error('❌ [DEBUG] getAccountBalance error:', error);
