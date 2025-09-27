@@ -203,8 +203,8 @@ Choose an action from the menu below or use commands directly:
 bot.start(async (ctx) => {
   const userId = ctx.from.id;
   
-  // Rate limiting: max 5 /start commands per minute
-  if (!(await checkRateLimit(userId, 'start', 5, 60000))) {
+  // Rate limiting: max 20 /start commands per minute
+  if (!(await checkRateLimit(userId, 'start', 20, 60000))) {
     return ctx.reply('⏳ **Rate Limit Exceeded**\nPlease wait a moment before trying again.');
   }
 
@@ -364,8 +364,8 @@ Do you understand the risks and wish to proceed?
 async function handleDepositRequest(ctx, amount) {
   const userId = ctx.from.id;
   
-  // Rate limiting: max 3 deposits per minute
-  if (!(await checkRateLimit(userId, 'deposit', 3, 60000))) {
+  // Rate limiting: max 10 deposits per minute
+  if (!(await checkRateLimit(userId, 'deposit', 10, 60000))) {
     return ctx.reply('⏳ **Rate Limit Exceeded**\nPlease wait a moment before making another deposit.');
   }
   
@@ -437,8 +437,8 @@ bot.command('deposit', async (ctx) => {
 async function handleBalanceRequest(ctx) {
   const userId = ctx.from.id;
   
-  // Rate limiting: max 10 balance checks per minute
-  if (!(await checkRateLimit(userId, 'balance', 10, 60000))) {
+  // Rate limiting: max 50 balance checks per minute
+  if (!(await checkRateLimit(userId, 'balance', 50, 60000))) {
     return ctx.reply('⏳ **Rate Limit Exceeded**\nPlease wait a moment before checking your balance again.');
   }
   
@@ -505,8 +505,8 @@ bot.command('transfer', async (ctx) => {
   try {
     const userId = ctx.from.id;
     
-    // Rate limiting: max 5 transfers per minute
-    if (!(await checkRateLimit(userId, 'transfer', 5, 60000))) {
+    // Rate limiting: max 20 transfers per minute
+    if (!(await checkRateLimit(userId, 'transfer', 20, 60000))) {
       return ctx.reply('⏳ **Rate Limit Exceeded**\nPlease wait a moment before making another transfer.');
     }
     
@@ -572,8 +572,8 @@ Your funds are now available in your futures account for trading.
 bot.command('markets', async (ctx) => {
   const userId = ctx.from.id;
   
-  // Rate limiting: max 15 market requests per minute
-  if (!(await checkRateLimit(userId, 'markets', 15, 60000))) {
+  // Rate limiting: max 60 market requests per minute
+  if (!(await checkRateLimit(userId, 'markets', 60, 60000))) {
     return ctx.reply('⏳ **Rate Limit Exceeded**\nPlease wait a moment before browsing markets again.');
   }
   
@@ -684,8 +684,8 @@ bot.command('price', async (ctx) => {
 const startTradingFlow = async (ctx, tradeType) => {
   const userId = ctx.from.id;
   
-  // Rate limiting: max 5 trading attempts per minute
-  if (!(await checkRateLimit(userId, 'trading', 5, 60000))) {
+  // Rate limiting: max 30 trading attempts per minute
+  if (!(await checkRateLimit(userId, 'trading', 30, 60000))) {
     return ctx.reply('⏳ **Rate Limit Exceeded**\nPlease wait a moment before making another trade.');
   }
   
