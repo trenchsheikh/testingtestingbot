@@ -778,6 +778,7 @@ bot.on('callback_query', async (ctx) => {
   try {
   const data = ctx.callbackQuery.data;
   const userId = ctx.from.id;
+  console.log(`🔍 Callback query received: ${data} from user ${userId}`);
   let session = await getUserSession(userId);
 
   // Load session from DB if not in cache
@@ -846,9 +847,9 @@ bot.on('callback_query', async (ctx) => {
   if (data === 'menu_transfer') {
     await ctx.answerCbQuery();
     // Set up transfer flow state
-    session.tradingFlow = { step: 'enter_transfer_details' };
+    session.tradingFlow = { step: 'enter_transfer_amount' };
     await saveUserSessionData(userId, session);
-    return ctx.reply('🔄 Transfer Funds\n\nEnter the amount and asset to transfer from Spot to Futures:\n\nFormat: `<amount> <asset>`\nExample: `25 USDT`', { parse_mode: 'Markdown' });
+    return ctx.reply('🔄 Transfer Funds\n\nEnter the amount of USDT to transfer from Spot to Futures:\n\nExample: `25`', { parse_mode: 'Markdown' });
   }
   if (data === 'menu_markets') {
     await ctx.answerCbQuery();
@@ -1198,16 +1199,19 @@ Your position has been closed and funds are available in your account.
   // --- Trading Flow (Asset Selection, Leverage, etc.) ---
   try {
     const flow = session.tradingFlow;
+    console.log(`🎯 Trading flow check - flow exists: ${!!flow}, step: ${flow?.step}, data: ${data}`);
     if (!flow) return ctx.answerCbQuery('This action has expired. Please start again.', { show_alert: true });
 
     if (flow.step === 'select_asset' && data.startsWith('select_asset_')) {
         flow.asset = data.replace('select_asset_', '');
         flow.step = 'enter_size';
+        await saveUserSessionData(userId, session);
         await ctx.answerCbQuery();
         await ctx.editMessageText(`Selected: **${flow.asset}**\n\nEnter position size (in USDT):`, { parse_mode: 'Markdown' });
     } else if (flow.step === 'enter_leverage' && data.startsWith('leverage_')) {
         flow.leverage = parseInt(data.replace('leverage_', ''));
         flow.step = 'confirm';
+        await saveUserSessionData(userId, session);
         const confirmKeyboard = Markup.inlineKeyboard([
             Markup.button.callback('✅ Confirm Trade', 'confirm_trade'),
             Markup.button.callback('❌ Cancel', 'cancel_trade')
@@ -1222,22 +1226,52 @@ Your position has been closed and funds are available in your account.
             { parse_mode: 'Markdown', ...confirmKeyboard }
         );
     } else if (flow.step === 'confirm' && data === 'confirm_trade') {
+        console.log('🎯 Confirm trade clicked - executing trade...');
         await ctx.answerCbQuery();
-        await ctx.editMessageText('Processing your trade...');
-        const result = await asterAPI.placeOrder(decrypt(session.apiKey), decrypt(session.apiSecret), {
+        await ctx.editMessageText('⏳ Processing your trade...');
+        
+        try {
+            const result = await asterAPI.placeOrder(decrypt(session.apiKey), decrypt(session.apiSecret), {
             symbol: flow.asset, side: flow.type, size: flow.size, leverage: flow.leverage
         });
+            
         session.tradingFlow = null; // End the flow
+            await saveUserSessionData(userId, session);
+            
         await ctx.editMessageText(
-            `✅ **Trade Executed!**\n\n` +
+                `✅ **Trade Executed Successfully!**\n\n` +
             `**Order ID:** \`${result.orderId}\`\n` +
             `**Symbol:** ${result.symbol}\n` +
-            `**Side:** ${result.side}\n` +
+                `**Side:** ${result.side.toUpperCase()}\n` +
+                `**Size:** ${flow.size} USDT\n` +
+                `**Leverage:** ${flow.leverage}x\n` +
             `**Quantity:** ${parseFloat(result.origQty).toFixed(5)}`,
             { parse_mode: 'Markdown' }
         );
+        } catch (tradeError) {
+            session.tradingFlow = null;
+            await saveUserSessionData(userId, session);
+            console.error('❌ Trade execution error:', tradeError);
+            
+            let userMessage = '❌ **Trade Failed** ';
+            if (tradeError.message.includes('insufficient') || tradeError.message.includes('balance')) {
+              userMessage += '❌ **Empty Futures Account!**\nYou have no USDT in your futures account to trade with.\n\n**To fix this:**\n1. Use `/deposit` to add USDT to your futures account\n2. Or transfer from spot using the Transfer button';
+            } else if (tradeError.message.includes('not supported symbol') || tradeError.message.includes('symbol')) {
+              userMessage += '❌ **Trading Pair Not Supported**\nThis asset is not available for trading. Please try a different symbol.';
+            } else if (tradeError.message.includes('leverage')) {
+              userMessage += '❌ **Invalid Leverage**\nThe leverage amount is too high for this trading pair. Please try a lower leverage (1x-10x).';
+            } else if (tradeError.message.includes('quantity') || tradeError.message.includes('size')) {
+              userMessage += '❌ **Position Size Too Large**\nYour position size exceeds your available balance or trading limits.\n\n**Try:**\n• Smaller position size\n• Check your futures balance with `/balance`';
+            } else if (tradeError.message.includes('network') || tradeError.message.includes('timeout')) {
+              userMessage += '❌ **Network Issue**\nConnection problem with the trading server. Please try again in a few moments.';
+            } else {
+              userMessage += '❌ **Trading Error**\nSomething went wrong. Please check your balance and try again.';
+            }
+            await ctx.editMessageText(userMessage, { parse_mode: 'Markdown' });
+        }
     } else if (data === 'cancel_trade') {
         session.tradingFlow = null; // End the flow
+        await saveUserSessionData(userId, session);
         await ctx.answerCbQuery();
         await ctx.editMessageText('❌ Trade cancelled.');
     }
@@ -1301,19 +1335,13 @@ bot.on('text', async (ctx) => {
     }
   }
 
-  // Handle transfer flow (when user enters amount and asset after clicking transfer button)
-  if (session?.tradingFlow?.step === 'enter_transfer_details') {
+  // Handle transfer flow (when user enters amount after clicking transfer button)
+  if (session?.tradingFlow?.step === 'enter_transfer_amount') {
     try {
-      const parts = ctx.message.text.trim().split(' ');
-      if (parts.length < 2) {
-        return ctx.reply('Please enter both amount and asset. Example: `25 USDT`', { parse_mode: 'Markdown' });
-      }
-
-      const amount = parseFloat(parts[0]);
-      const asset = parts[1].toUpperCase();
+      const amount = parseFloat(ctx.message.text);
 
       if (isNaN(amount) || amount <= 0) {
-        return ctx.reply('Invalid amount. Please enter a positive number.');
+        return ctx.reply('❌ Invalid amount. Please enter a valid number (e.g., 25):');
       }
 
       // Clear the trading flow and handle transfer
@@ -1321,12 +1349,12 @@ bot.on('text', async (ctx) => {
       await saveUserSessionData(userId, session);
 
       // Call the transfer command handler directly
-      const result = await asterAPI.transferSpotToFutures(decrypt(session.apiKey), decrypt(session.apiSecret), asset, amount);
+      const result = await asterAPI.transferSpotToFutures(decrypt(session.apiKey), decrypt(session.apiSecret), amount, 'USDT');
       
       const transferMessage = `
 ✅ **Transfer Successful!**
 
-**Asset:** ${asset}
+**Asset:** USDT
 **Amount:** ${amount}
 **Transaction ID:** ${result.transactionId}
 **Status:** ${result.status}
