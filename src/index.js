@@ -1022,10 +1022,12 @@ try {
 }
 
 console.log('🚀 [DEBUG] Starting bot launch...');
+startKeepAliveServer();
 bot.launch().then(() => {
+  
   console.log('🚀 [DEBUG] AsterDex Multi-User Bot started successfully!');
   console.log('✅ [DEBUG] Bot is ready to receive commands');
-  startKeepAliveServer();
+  
 }).catch((error) => {
   console.error('❌ [DEBUG] Bot launch failed:', error);
   console.error('❌ [DEBUG] Launch error stack:', error.stack);
