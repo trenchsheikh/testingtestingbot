@@ -1,7 +1,6 @@
 import 'dotenv/config';
 import { Telegraf, Markup } from 'telegraf';
 import crypto from 'crypto';
-import { createClient } from 'redis';
 import { AsterAPI } from './asterdex.js';
 import { BNBWallet } from './bnb-wallet.js';
 import { saveUserSession, loadUserSession } from './database.js';
@@ -27,101 +26,49 @@ const asterAPI = new AsterAPI();
 // Note: Removed userSessions Map to prevent memory leaks with 1000s of users
 // Now using MongoDB directly for all session data
 
-// Redis client for caching and rate limiting
-let redisClient = null;
+// Rate limiting storage (in-memory with auto-cleanup)
+const userRateLimits = new Map();
 
-// Initialize Redis client (with fallback if Redis fails)
-if (process.env.REDIS_URL) {
-  redisClient = createClient({
-    url: process.env.REDIS_URL
-  });
+// Simple rate limiting (works for single instance)
+function checkRateLimit(userId, action, maxRequests, windowMs) {
+  const now = Date.now();
+  const key = `${userId}:${action}`;
   
-  redisClient.on('error', (err) => {
-    console.error('❌ Redis connection error:', err);
-    redisClient = null; // Disable Redis on error
-  });
-  
-  redisClient.on('connect', () => {
-    console.log('✅ Redis connected successfully');
-  });
-}
-
-// Redis-based rate limiting (works across multiple instances)
-async function checkRateLimit(userId, action, maxRequests, windowMs) {
-  if (!redisClient) {
-    return true; // Allow if Redis is not available
+  if (!userRateLimits.has(key)) {
+    userRateLimits.set(key, []);
   }
   
-  try {
-    const key = `rate_limit:${userId}:${action}`;
-    const now = Date.now();
-    
-    // Use Redis sorted set for sliding window rate limiting
-    const pipeline = redisClient.multi();
-    
-    // Remove old entries (outside the window)
-    pipeline.zRemRangeByScore(key, 0, now - windowMs);
-    
-    // Count current entries
-    pipeline.zCard(key);
-    
-    // Add current request
-    pipeline.zAdd(key, { score: now, value: now.toString() });
-    
-    // Set expiration
-    pipeline.expire(key, Math.ceil(windowMs / 1000));
-    
-    const results = await pipeline.exec();
-    const currentCount = results[1][1]; // Get count result
-    
-    return currentCount < maxRequests;
-  } catch (error) {
-    console.error('❌ Rate limiting error:', error);
-    return true; // Allow if Redis fails
+  const requests = userRateLimits.get(key);
+  
+  // Remove old requests outside the time window
+  const validRequests = requests.filter(time => now - time < windowMs);
+  
+  // Check if limit exceeded
+  if (validRequests.length >= maxRequests) {
+    return false; // Rate limit exceeded
   }
+  
+  // Add current request
+  validRequests.push(now);
+  userRateLimits.set(key, validRequests);
+  
+  return true; // Request allowed
 }
 
-// Helper function to get user session with Redis caching
+// Cleanup old rate limit data every 5 minutes
+setInterval(() => {
+  userRateLimits.clear();
+  console.log('🧹 Cleared rate limit cache');
+}, 5 * 60 * 1000);
+
+// Helper function to get user session from database
 async function getUserSession(userId) {
-  try {
-    // Try Redis first (if available)
-    if (redisClient) {
-      const cached = await redisClient.get(`session:${userId}`);
-      if (cached) {
-        return JSON.parse(cached);
-      }
-    }
-    
-    // Fallback to MongoDB
-    const session = await loadUserSession(userId);
-    
-    // Cache in Redis for 1 hour (if Redis is available)
-    if (session && redisClient) {
-      await redisClient.setEx(`session:${userId}`, 3600, JSON.stringify(session));
-    }
-    
-    return session;
-  } catch (error) {
-    console.error('❌ Session retrieval error:', error);
-    // Always fallback to MongoDB if Redis fails
-    return await loadUserSession(userId);
-  }
+  return await loadUserSession(userId);
 }
 
-// Helper function to save user session with Redis caching
+// Helper function to save user session to database
 async function saveUserSessionData(userId, sessionData) {
-  try {
-    // Save to MongoDB first (source of truth)
-    await saveUserSession(userId, sessionData);
-    
-    // Update Redis cache (if available)
-    if (redisClient) {
-      await redisClient.setEx(`session:${userId}`, 3600, JSON.stringify(sessionData));
-    }
-  } catch (error) {
-    console.error('❌ Session save error:', error);
-    throw error; // Re-throw to maintain error handling
-  }
+  await saveUserSession(userId, sessionData);
 }
 
 // Encryption/Decryption functions for sensitive data
@@ -204,7 +151,7 @@ bot.start(async (ctx) => {
   const userId = ctx.from.id;
   
   // Rate limiting: max 20 /start commands per minute
-  if (!(await checkRateLimit(userId, 'start', 20, 60000))) {
+  if (!checkRateLimit(userId, 'start', 20, 60000)) {
     return ctx.reply('⏳ **Rate Limit Exceeded**\nPlease wait a moment before trying again.');
   }
 
@@ -365,7 +312,7 @@ async function handleDepositRequest(ctx, amount) {
   const userId = ctx.from.id;
   
   // Rate limiting: max 10 deposits per minute
-  if (!(await checkRateLimit(userId, 'deposit', 10, 60000))) {
+  if (!checkRateLimit(userId, 'deposit', 10, 60000)) {
     return ctx.reply('⏳ **Rate Limit Exceeded**\nPlease wait a moment before making another deposit.');
   }
   
@@ -438,7 +385,7 @@ async function handleBalanceRequest(ctx) {
   const userId = ctx.from.id;
   
   // Rate limiting: max 50 balance checks per minute
-  if (!(await checkRateLimit(userId, 'balance', 50, 60000))) {
+  if (!checkRateLimit(userId, 'balance', 50, 60000)) {
     return ctx.reply('⏳ **Rate Limit Exceeded**\nPlease wait a moment before checking your balance again.');
   }
   
@@ -506,7 +453,7 @@ bot.command('transfer', async (ctx) => {
     const userId = ctx.from.id;
     
     // Rate limiting: max 20 transfers per minute
-    if (!(await checkRateLimit(userId, 'transfer', 20, 60000))) {
+    if (!checkRateLimit(userId, 'transfer', 20, 60000)) {
       return ctx.reply('⏳ **Rate Limit Exceeded**\nPlease wait a moment before making another transfer.');
     }
     
@@ -573,7 +520,7 @@ bot.command('markets', async (ctx) => {
   const userId = ctx.from.id;
   
   // Rate limiting: max 60 market requests per minute
-  if (!(await checkRateLimit(userId, 'markets', 60, 60000))) {
+  if (!checkRateLimit(userId, 'markets', 60, 60000)) {
     return ctx.reply('⏳ **Rate Limit Exceeded**\nPlease wait a moment before browsing markets again.');
   }
   
@@ -685,7 +632,7 @@ const startTradingFlow = async (ctx, tradeType) => {
   const userId = ctx.from.id;
   
   // Rate limiting: max 30 trading attempts per minute
-  if (!(await checkRateLimit(userId, 'trading', 30, 60000))) {
+  if (!checkRateLimit(userId, 'trading', 30, 60000)) {
     return ctx.reply('⏳ **Rate Limit Exceeded**\nPlease wait a moment before making another trade.');
   }
   
@@ -1490,34 +1437,15 @@ try {
 }
 
 console.log('🚀 Starting bot launch...');
-
-// Initialize Redis connection
-async function initializeRedis() {
-  if (redisClient) {
-    try {
-      await redisClient.connect();
-      console.log('✅ Redis connected successfully');
-    } catch (error) {
-      console.error('❌ Redis connection failed:', error);
-      redisClient = null; // Disable Redis on connection failure
-    }
-  }
-}
-
-// Initialize Redis and start bot
-initializeRedis().then(() => {
-  startKeepAliveServer();
-  bot.launch().then(() => {
+startKeepAliveServer();
+bot.launch().then(() => {
   
-    console.log('🚀 AsterDex Multi-User Bot started successfully!');
-    console.log('✅ Bot is ready to receive commands');
-    
-  }).catch((error) => {
-    console.error('❌ [DEBUG] Bot launch failed:', error);
-    console.error('❌ [DEBUG] Launch error stack:', error.stack);
-  });
+  console.log('🚀 AsterDex Multi-User Bot started successfully!');
+  console.log('✅ Bot is ready to receive commands');
+  
 }).catch((error) => {
-  console.error('❌ Bot initialization failed:', error);
+  console.error('❌ [DEBUG] Bot launch failed:', error);
+  console.error('❌ [DEBUG] Launch error stack:', error.stack);
 });
 
 console.log('🛡️ Setting up signal handlers...');
