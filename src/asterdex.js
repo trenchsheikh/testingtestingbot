@@ -168,12 +168,72 @@ export class AsterAPI {
         }
     }
 
+    // Function to test if a symbol is supported
+    async testSymbolSupport(symbol, apiKey, apiSecret) {
+        try {
+            // Instead of placing an order, let's check if the symbol exists in exchange info
+            console.log(`🔍 Checking symbol support for ${symbol}...`);
+            
+            // Get exchange info to check if symbol exists and is trading
+            const exchangeInfoResponse = await this.futuresClient.get('/fapi/v1/exchangeInfo');
+            const symbolInfo = exchangeInfoResponse.data.symbols.find(s => s.symbol === symbol);
+            
+            if (!symbolInfo) {
+                console.log(`❌ Symbol ${symbol} not found in exchange info`);
+                return { supported: false, maxLeverage: 1, lastTested: Date.now() };
+            }
+            
+            if (symbolInfo.status !== 'TRADING') {
+                console.log(`❌ Symbol ${symbol} is not trading (status: ${symbolInfo.status})`);
+                return { supported: false, maxLeverage: 1, lastTested: Date.now() };
+            }
+            
+            // Try to get leverage brackets for the symbol
+            try {
+                const leverageResponse = await this.futuresClient.get('/fapi/v1/leverageBracket', {
+                    params: { symbol: symbol }
+                });
+                
+                if (leverageResponse.data && leverageResponse.data.length > 0) {
+                    const maxLeverage = Math.max(...leverageResponse.data.map(bracket => parseInt(bracket.leverage)));
+                    console.log(`✅ Symbol ${symbol} is supported with max leverage ${maxLeverage}x`);
+                    return { supported: true, maxLeverage, lastTested: Date.now() };
+                }
+            } catch (leverageError) {
+                console.log(`⚠️ Could not get leverage info for ${symbol}, assuming supported with default leverage`);
+            }
+            
+            // If we get here, symbol exists and is trading
+            console.log(`✅ Symbol ${symbol} is supported (default leverage)`);
+            return { supported: true, maxLeverage: 100, lastTested: Date.now() };
+            
+        } catch (error) {
+            console.log(`❌ Error checking symbol support for ${symbol}:`, error.message);
+            // If we can't check, assume it's supported (better to be permissive)
+            return { supported: true, maxLeverage: 100, lastTested: Date.now() };
+        }
+    }
+
     async placeOrder(apiKey, apiSecret, orderData) {
         try {
             console.log('📈 Placing order with data:', orderData);
             const { symbol, side, size, type = 'MARKET', price = null, leverage = 1 } = orderData;
 
-            // 1. Set leverage first
+            // 1. Check if symbol is supported (quick check)
+            console.log(`🔍 Checking symbol support for ${symbol}...`);
+            const symbolTest = await this.testSymbolSupport(symbol, apiKey, apiSecret);
+            if (!symbolTest.supported) {
+                throw new Error(`❌ Symbol ${symbol} is not supported for trading. Please try a different symbol.`);
+            }
+
+            // Use the tested max leverage if it's lower than requested
+            const maxLeverage = symbolTest.maxLeverage;
+            if (leverage > maxLeverage) {
+                console.log(`⚠️ Requested leverage ${leverage} exceeds max ${maxLeverage} for ${symbol}, using ${maxLeverage}`);
+                leverage = maxLeverage;
+            }
+
+            // 2. Set leverage
             await this.setLeverage(apiKey, apiSecret, symbol, leverage);
 
             // 2. Fetch exchange info to get precision for the quantity
@@ -211,8 +271,19 @@ export class AsterAPI {
             
             return response.data;
         } catch (error) {
-            console.error('❌ placeOrder error:', error.response?.data || error.message);
-            throw new Error(`Unable to place order: ${error.response?.data?.msg || error.message}`);
+            const errorMsg = error.response?.data?.msg || error.message;
+            console.error('❌ placeOrder error:', errorMsg);
+            
+            // Provide more helpful error messages
+            if (errorMsg.includes('not supported symbol') || error.response?.data?.code === -4095) {
+                throw new Error(`❌ Symbol ${orderData.symbol} is not supported for trading. Please try a different symbol.`);
+            } else if (errorMsg.includes('insufficient balance') || errorMsg.includes('margin')) {
+                throw new Error(`❌ Insufficient balance. Please deposit more USDT to your account.`);
+            } else if (errorMsg.includes('leverage')) {
+                throw new Error(`❌ Invalid leverage for ${orderData.symbol}. Please try a lower leverage.`);
+            } else {
+                throw new Error(`❌ Order failed: ${errorMsg}`);
+            }
         }
     }
 
@@ -447,7 +518,13 @@ export class AsterAPI {
 
             allSymbols.forEach(symbol => {
                 // Check if the symbol is a known crypto pair and is trading
-                if (cryptoIdentifiers.some(id => symbol.symbol.endsWith(id)) && symbol.status === 'TRADING') {
+                // Also filter out leveraged tokens
+                if (cryptoIdentifiers.some(id => symbol.symbol.endsWith(id)) && 
+                    symbol.status === 'TRADING' &&
+                    !symbol.symbol.includes('UP') &&
+                    !symbol.symbol.includes('DOWN') &&
+                    !symbol.symbol.includes('BULL') &&
+                    !symbol.symbol.includes('BEAR')) {
                     cryptoMarkets.push({
                         symbol: symbol.symbol,
                         status: symbol.status
