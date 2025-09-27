@@ -1,7 +1,10 @@
 import 'dotenv/config';
 import { Telegraf, Markup } from 'telegraf';
+import axios from 'axios';
 import { AsterAPI } from './asterdex.js';
 import { BNBWallet } from './bnb-wallet.js';
+import { saveUserSession, loadUserSession } from './database.js';
+import { startKeepAliveServer } from './web.js';
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 if (!BOT_TOKEN) {
@@ -87,105 +90,113 @@ async function testSymbolSupport(symbol, apiKey, apiSecret) {
   }
 }
 
+// Function to show the main menu
+async function showMainMenu(ctx) {
+  const userId = ctx.from.id;
+  let session = userSessions.get(userId);
+
+  // If session is not in memory, try loading it from the database
+  if (!session) {
+    session = await loadUserSession(userId);
+    if (session) {
+      userSessions.set(userId, session); // Add to memory for faster access next time
+    }
+  }
+  
+  const menuKeyboard = Markup.inlineKeyboard([
+    [
+      Markup.button.callback('💰 Balance', 'menu_balance'),
+      Markup.button.callback('📊 Positions', 'menu_positions')
+    ],
+    [
+      Markup.button.callback('📈 Long Position', 'menu_long'),
+      Markup.button.callback('📉 Short Position', 'menu_short')
+    ],
+    [
+      // --- MODIFIED LINE ---
+      Markup.button.callback('💸 Deposit', 'menu_deposit'), 
+      Markup.button.callback('🔄 Transfer', 'menu_transfer')
+    ],
+    [
+      Markup.button.callback('📋 Markets', 'menu_markets'),
+      Markup.button.callback('❌ Close Position', 'menu_close')
+    ],
+    [
+       Markup.button.callback('🔑 Export Key', 'menu_export')
+    ]
+  ]);
+
+  const menuMessage = `
+🎯 **AsterDex Trading Bot - Main Menu**
+
+**Wallet:** \`${session?.walletAddress || 'Not initialized'}\`
+
+Choose an action from the menu below or use commands directly:
+  `;
+
+  // Use editMessageText if possible, otherwise send a new message
+  try {
+      if (ctx.updateType === 'callback_query') {
+          await ctx.editMessageText(menuMessage, { 
+              parse_mode: 'Markdown', 
+              ...menuKeyboard 
+          });
+      } else {
+          await ctx.reply(menuMessage, { 
+              parse_mode: 'Markdown', 
+              ...menuKeyboard 
+          });
+      }
+  } catch (error) {
+      // This can fail if the message is identical, so just log it.
+      console.log('Info: Could not edit menu message, it might be the same.');
+  }
+}
+
 // --- THE NEW ONBOARDING FLOW ---
 bot.start(async (ctx) => {
   console.log('🚀 [DEBUG] /start command received from user:', ctx.from.id);
   const userId = ctx.from.id;
-  let session = userSessions.get(userId);
-  console.log('🔍 [DEBUG] Current session exists:', !!session);
 
-  // If the user already exists, reset any stuck trading flow
+  // 1. Try to load the user from the database
+  let session = await loadUserSession(userId);
+
   if (session) {
-      console.log('🔄 [DEBUG] Resetting trading flow for existing user');
-      session.tradingFlow = null;
-      userSessions.set(userId, session);
+    // If user exists, add their session to the in-memory cache and welcome them back
+    userSessions.set(userId, session);
+    await ctx.reply(`🎉 Welcome back! Your wallet is: \`${session.walletAddress}\``, { parse_mode: 'Markdown' });
+    return showMainMenu(ctx);
   }
 
-  if (session && session.apiKey) {
-      console.log('✅ [DEBUG] Returning welcome back message for existing user');
-      return ctx.reply(`🎉 **Welcome back!** Any previous action has been cancelled.\n\nYour wallet address is:\n\`${session.walletAddress}\``, { parse_mode: 'Markdown' });
-  }
-
+  // 2. If user does NOT exist, create a new wallet and session
   try {
-      console.log('👋 [DEBUG] Sending welcome message to new user');
-      await ctx.reply('👋 Welcome! Creating your secure wallet and API keys. This might take a moment...');
-      
-      console.log('🔑 [DEBUG] Creating new wallet...');
+      await ctx.reply('👋 Welcome! Creating your secure wallet and API keys...');
+
       const newWallet = BNBWallet.createWallet();
-      console.log('✅ [DEBUG] Wallet created:', newWallet.address);
-      
-      console.log('🔐 [DEBUG] Creating API keys for wallet...');
       const apiKeys = await asterAPI.createApiKeysForWallet(newWallet);
-      console.log('✅ [DEBUG] API keys created successfully');
-      
-      console.log('💾 [DEBUG] Storing user session...');
-      session = {
+
+      const newSession = {
+          _id: userId, // Use userId as the unique ID for the database
           walletAddress: newWallet.address,
-          privateKey: newWallet.privateKey, // WARNING: Encrypt this in production!
+          privateKey: newWallet.privateKey,
           apiKey: apiKeys.apiKey,
           apiSecret: apiKeys.apiSecret,
           isInitialized: true,
           tradingFlow: null
       };
-      userSessions.set(userId, session);
-      console.log('✅ [DEBUG] User session stored successfully');
 
-      const welcomeMessage = `
-✅ **Setup Complete!**
-Your unique BEP-20 wallet address is:
-\`${session.walletAddress}\`
-**IMPORTANT**: You must send funds to this address to trade.
+      // 3. Save the new session to the database AND the in-memory cache
+      await saveUserSession(userId, newSession);
+      userSessions.set(userId, newSession);
+      console.log('✅ [DEBUG] User session stored successfully in DB and cache.');
 
-Use /menu to see the main menu with buttons, or /help to see all commands.
-      `;
-      console.log('📤 [DEBUG] Sending welcome message to user');
+      const welcomeMessage = `✅ **Setup Complete!**\nYour unique BEP-20 wallet address is:\n\`${newSession.walletAddress}\`\n\n**IMPORTANT**: Send funds (USDT, BNB etc.) to this address to begin trading.`;
       await ctx.reply(welcomeMessage, { parse_mode: 'Markdown' });
-      console.log('✅ [DEBUG] Welcome message sent successfully');
-      
-      // Show the main menu after setup
-      console.log('📋 [DEBUG] Showing main menu after setup');
-      const menuKeyboard = Markup.inlineKeyboard([
-        [
-          Markup.button.callback('💰 Balance', 'menu_balance'),
-          Markup.button.callback('📊 Positions', 'menu_positions')
-        ],
-        [
-          Markup.button.callback('📈 Long Position', 'menu_long'),
-          Markup.button.callback('📉 Short Position', 'menu_short')
-        ],
-        [
-          Markup.button.callback('💸 Transfer Funds', 'menu_transfer'),
-          Markup.button.callback('🔑 Export Key', 'menu_export')
-        ],
-        [
-          Markup.button.callback('📋 Markets', 'menu_markets'),
-          Markup.button.callback('❌ Close Position', 'menu_close')
-        ],
-      ]);
 
-      const menuMessage = `
-🎯 **AsterDex Trading Bot - Main Menu**
-
-**Wallet:** \`${session.walletAddress}\`
-
-Choose an action from the menu below or use commands directly:
-• Type /long or /short to trade
-• Type /transfer 25 USDT to transfer funds
-• Type /balance to check your balance
-• Type /export to export your private key
-
-💡 **Tip:** You can use both buttons and commands!
-      `;
-
-      await ctx.reply(menuMessage, { 
-        parse_mode: 'Markdown', 
-        ...menuKeyboard 
-      });
-      console.log('✅ [DEBUG] Main menu sent successfully');
+      await showMainMenu(ctx);
 
   } catch (error) {
-      console.error('❌ [DEBUG] Error in /start command:', error);
-      console.error('❌ [DEBUG] Error stack:', error.stack);
+      console.error('❌ [DEBUG] Error in /start command for new user:', error);
       await ctx.reply(`❌ Account setup failed: ${error.message}\nPlease try /start again.`);
   }
 });
@@ -193,7 +204,16 @@ Choose an action from the menu below or use commands directly:
 // Cancel command
 bot.command('cancel', async (ctx) => {
   const userId = ctx.from.id;
-  const session = userSessions.get(userId);
+  let session = userSessions.get(userId);
+
+  // If session is not in memory, try loading it from the database
+  if (!session) {
+    session = await loadUserSession(userId);
+    if (session) {
+      userSessions.set(userId, session); // Add to memory for faster access next time
+    }
+  }
+
   if (session) {
       session.tradingFlow = null;
       userSessions.set(userId, session);
@@ -203,15 +223,16 @@ bot.command('cancel', async (ctx) => {
 
 // Help command
 bot.help(async (ctx) => {
+  // --- MODIFIED TEXT ---
   const helpText = `
 📋 **Available Commands:**
 /start - Start the bot & create your wallet
 /menu - Show the main menu with buttons
-/balance - Check your futures balance
-/transfer [amount] [asset] - Transfer from spot to futures
+/balance - Check all your balances (Wallet, Spot, Futures)
+/deposit [amount] - Alternative to /transfer . Deposit USDT directly from your wallet to Futures account
+/transfer [amount] [asset] - Transfer from your Spot to Futures account . You will need to manually deposit USDT to your Spot account.
 /export - Export your wallet's private key
-/long - Start opening a long position
-/short - Start opening a short position
+/long & /short - Start opening a trade
 /positions - View your open positions
 /close - Select a position to close
 /cancel - Cancel your current action (like an open trade)
@@ -222,7 +243,15 @@ bot.help(async (ctx) => {
 // Main Menu command
 bot.command('menu', async (ctx) => {
   const userId = ctx.from.id;
-  const session = userSessions.get(userId);
+  let session = userSessions.get(userId);
+
+  // If session is not in memory, try loading it from the database
+  if (!session) {
+    session = await loadUserSession(userId);
+    if (session) {
+      userSessions.set(userId, session); // Add to memory for faster access next time
+    }
+  }
   
   if (!session?.isInitialized) {
     return ctx.reply('Please use /start first to set up your account.');
@@ -272,7 +301,15 @@ Choose an action from the menu below or use commands directly:
 // Export private key command
 bot.command('export', async (ctx) => {
   const userId = ctx.from.id;
-  const session = userSessions.get(userId);
+  let session = userSessions.get(userId);
+
+  // If session is not in memory, try loading it from the database
+  if (!session) {
+    session = await loadUserSession(userId);
+    if (session) {
+      userSessions.set(userId, session); // Add to memory for faster access next time
+    }
+  }
 
   if (!session?.isInitialized || !session.privateKey) {
     return ctx.reply('Please use /start first to generate a wallet.');
@@ -300,10 +337,73 @@ Do you understand the risks and wish to proceed?
 });
 
 
+// Shared deposit function
+async function handleDepositRequest(ctx, amount) {
+  console.log('💸 [DEBUG] /deposit command received from user:', ctx.from.id);
+  const userId = ctx.from.id;
+  let session = userSessions.get(userId);
+
+  if (!session) {
+    session = await loadUserSession(userId);
+    if (session) userSessions.set(userId, session);
+  }
+  
+  if (!session?.isInitialized) {
+    return ctx.reply('Please use /start first.');
+  }
+
+  const ASTER_TREASURY_ADDRESS = '0x128463A60784c4D3f46c23Af3f65Ed859Ba87974';
+
+  if (isNaN(amount) || amount <= 0) {
+    return ctx.reply('Please provide a valid amount in USDT.\nUsage: `/deposit 50`', { parse_mode: 'Markdown' });
+  }
+
+  try {
+    // Check for sufficient BNB for gas fees
+    const bnbBalance = await BNBWallet.getWalletBalance(session.walletAddress);
+    if (parseFloat(bnbBalance) < 0.001) {
+      return ctx.reply('⚠️ **Low Gas Balance!**\nYou need at least ~0.001 BNB in your wallet to pay for transaction fees.', { parse_mode: 'Markdown' });
+    }
+    
+    // Check for sufficient USDT balance
+    const usdtBalance = await BNBWallet.getUsdtBalance(session.walletAddress);
+    if (parseFloat(usdtBalance) < amount) {
+      return ctx.reply(`⚠️ **Insufficient USDT!**\nYour wallet has ${usdtBalance} USDT, but you're trying to deposit ${amount} USDT.`, { parse_mode: 'Markdown' });
+    }
+
+    await ctx.reply(`Depositing ${amount} USDT directly to the Aster exchange. Please wait for the on-chain transaction to confirm...`);
+    
+    // Call the new, direct transfer function
+    const tx = await BNBWallet.sendUsdt(session.privateKey, ASTER_TREASURY_ADDRESS, amount);
+    
+    await ctx.reply(`✅ **Deposit Transaction Sent!**\nYour funds should appear in your **Futures Account** in a few minutes.\n\n**Transaction Hash:** \`${tx.hash}\``, { parse_mode: 'Markdown' });
+
+  } catch (error) {
+    console.error('❌ [DEBUG] Error in /deposit command:', error);
+    const errorMessage = error.code === 'INSUFFICIENT_FUNDS' ? 'Insufficient BNB for gas fees.' : error.message;
+    await ctx.reply(`❌ Deposit failed: ${errorMessage}`);
+  }
+}
+
+// Deposit command
+bot.command('deposit', async (ctx) => {
+  const args = ctx.message.text.split(' ');
+  const amount = parseFloat(args[1]);
+  await handleDepositRequest(ctx, amount);
+});
+
 // Balance command
-bot.command('balance', async (ctx) => {
+
+
+async function handleBalanceRequest(ctx) {
   console.log('💰 [DEBUG] /balance (all) command received from user:', ctx.from.id);
-  const session = userSessions.get(ctx.from.id);
+  const userId = ctx.from.id;
+  let session = userSessions.get(userId);
+
+  if (!session) {
+    session = await loadUserSession(userId);
+    if (session) userSessions.set(userId, session);
+  }
   
   if (!session?.isInitialized) {
     return ctx.reply('Please use /start first to set up your account.');
@@ -312,35 +412,32 @@ bot.command('balance', async (ctx) => {
   await ctx.reply('Hold on, fetching all your balances...');
 
   try {
-    // Fetch all three balances in parallel for speed
-    const [onChainBalance, spotBalances, futuresBalance] = await Promise.all([
+    const [onChainBnb, onChainUsdt, spotBalances, futuresBalance] = await Promise.all([
       BNBWallet.getWalletBalance(session.walletAddress),
+      BNBWallet.getUsdtBalance(session.walletAddress),
       asterAPI.getSpotAccountBalance(session.apiKey, session.apiSecret),
       asterAPI.getAccountBalance(session.apiKey, session.apiSecret)
     ]);
 
-    // --- Build the response message ---
     let balanceMessage = `
 💰 **Your Complete Balances:**
 **Address:** \`${session.walletAddress}\`
 -----------------------------------
 `;
-
-    // 1. On-Chain Wallet Balance
-    balanceMessage += `**BNB Wallet:** \`${onChainBalance} BNB\`\n`;
-
-    // 2. Spot Account Balances
+    balanceMessage += `**On-Chain Wallet:**\n`;
+    balanceMessage += `  - \`${onChainBnb} BNB\`\n`;
+    balanceMessage += `  - \`${onChainUsdt} USDT\`\n`;
     balanceMessage += `**Spot Account:**\n`;
+
     if (Object.keys(spotBalances).length > 0) {
       for (const asset in spotBalances) {
         balanceMessage += `  - \`${spotBalances[asset].toFixed(4)} ${asset}\`\n`;
       }
     } else {
-      balanceMessage += `  - \`Empty\`\n`;
+      // --- MODIFIED LINE ---
+      balanceMessage += `  - \`0.00 USDT\`\n`;
     }
     balanceMessage += `-----------------------------------\n`;
-
-    // 3. Futures Account Balance
     balanceMessage += `**Futures Account:**\n`;
     balanceMessage += `  - **Available:** \`${futuresBalance.available} USDT\`\n`;
     balanceMessage += `  - **Total Margin:** \`${futuresBalance.total} USDT\`\n`;
@@ -351,7 +448,19 @@ bot.command('balance', async (ctx) => {
     console.error('❌ [DEBUG] Error in combined /balance command:', error);
     await ctx.reply(`❌ An error occurred while fetching balances: ${error.message}`);
   }
-});
+}
+
+bot.command('balance', handleBalanceRequest);
+
+// Inside your bot.on('callback_query', ...) handler
+// ...
+// if (data === 'menu_balance') {
+//     await ctx.answerCbQuery();
+//     // The button also calls the same handler function
+//     return handleBalanceRequest(ctx); 
+// }
+
+// Add this new handler for the deposit button
 
 
 
@@ -378,7 +487,15 @@ bot.command('transfer', async (ctx) => {
     }
 
     const userId = ctx.from.id;
-    const session = userSessions.get(userId);
+    let session = userSessions.get(userId);
+
+    // If session is not in memory, try loading it from the database
+    if (!session) {
+      session = await loadUserSession(userId);
+      if (session) {
+        userSessions.set(userId, session); // Add to memory for faster access next time
+      }
+    }
     
     if (!session?.isInitialized) {
       return ctx.reply('Please use /start first to initialize your account.');
@@ -466,7 +583,17 @@ bot.command('price', async (ctx) => {
     const symbol = args[1]?.toUpperCase() || 'BNBUSDT'; 
     
     // Use the user's session keys for the API call
-    const session = userSessions.get(ctx.from.id);
+    const userId = ctx.from.id;
+    let session = userSessions.get(userId);
+
+    // If session is not in memory, try loading it from the database
+    if (!session) {
+      session = await loadUserSession(userId);
+      if (session) {
+        userSessions.set(userId, session); // Add to memory for faster access next time
+      }
+    }
+
     if (!session?.isInitialized) {
       return ctx.reply('Please use /start first to set up your account.');
     }
@@ -492,7 +619,16 @@ bot.command('price', async (ctx) => {
 // Long position command
 const startTradingFlow = async (ctx, tradeType) => {
   const userId = ctx.from.id;
-  const session = userSessions.get(userId);
+  let session = userSessions.get(userId);
+
+  // If session is not in memory, try loading it from the database
+  if (!session) {
+    session = await loadUserSession(userId);
+    if (session) {
+      userSessions.set(userId, session); // Add to memory for faster access next time
+    }
+  }
+
   if (!session?.isInitialized) {
       return ctx.reply('Please use /start first to initialize your account.');
   }
@@ -549,7 +685,17 @@ bot.command('positions', async (ctx) => {
     const args = ctx.message.text.split(' ');
     const symbol = args[1];
     
-    const session = userSessions.get(ctx.from.id);
+    const userId = ctx.from.id;
+    let session = userSessions.get(userId);
+
+    // If session is not in memory, try loading it from the database
+    if (!session) {
+      session = await loadUserSession(userId);
+      if (session) {
+        userSessions.set(userId, session); // Add to memory for faster access next time
+      }
+    }
+
     if (!session?.isInitialized) {
       return ctx.reply('Please use /start first to set up your account.');
     }
@@ -581,7 +727,17 @@ bot.command('positions', async (ctx) => {
 // Close positions command
 bot.command('close', async (ctx) => {
   try {
-    const session = userSessions.get(ctx.from.id);
+    const userId = ctx.from.id;
+    let session = userSessions.get(userId);
+
+    // If session is not in memory, try loading it from the database
+    if (!session) {
+      session = await loadUserSession(userId);
+      if (session) {
+        userSessions.set(userId, session); // Add to memory for faster access next time
+      }
+    }
+
     if (!session?.isInitialized) {
       return ctx.reply('Please use /start first to set up your account.');
     }
@@ -609,7 +765,17 @@ bot.command('close', async (ctx) => {
 bot.command('spotbalance', async (ctx) => {
   console.log('💳 [DEBUG] /spotbalance command received from user:', ctx.from.id);
   try {
-    const session = userSessions.get(ctx.from.id);
+    const userId = ctx.from.id;
+    let session = userSessions.get(userId);
+
+    // If session is not in memory, try loading it from the database
+    if (!session) {
+      session = await loadUserSession(userId);
+      if (session) {
+        userSessions.set(userId, session); // Add to memory for faster access next time
+      }
+    }
+
     if (!session?.isInitialized) {
       return ctx.reply('Please use /start first to set up your account.');
     }
@@ -643,554 +809,126 @@ bot.command('spotbalance', async (ctx) => {
 bot.on('callback_query', async (ctx) => {
   const data = ctx.callbackQuery.data;
   const userId = ctx.from.id;
-  const session = userSessions.get(userId);
+  let session = userSessions.get(userId);
 
-  // Handle menu button callbacks
-  if (data.startsWith('menu_')) {
-    // THIS IS THE NEW, CORRECTED CODE
-    // THIS IS THE NEW, CORRECTED CODE
-if (data === 'menu_balance') {
-  await ctx.answerCbQuery();
-  console.log('💰 [DEBUG] Balance button (callback) received from user:', ctx.from.id);
-  
-  // Use the exact same logic as the /balance command
-  const session = userSessions.get(ctx.from.id);
-  if (!session?.isInitialized) {
-      return ctx.reply('Please use /start first to set up your account.');
+  // Load session from DB if not in cache
+  if (!session) {
+    session = await loadUserSession(userId);
+    if (session) {
+      userSessions.set(userId, session);
+    } else {
+      // If no session exists at all, ask user to /start
+      return ctx.answerCbQuery('Please use /start to initialize your bot.', { show_alert: true });
+    }
   }
 
-  await ctx.reply('Hold on, fetching all your balances...');
-
-  try {
-      const [onChainBalance, spotBalances, futuresBalance] = await Promise.all([
-          BNBWallet.getWalletBalance(session.walletAddress),
-          asterAPI.getSpotAccountBalance(session.apiKey, session.apiSecret),
-          asterAPI.getAccountBalance(session.apiKey, session.apiSecret)
-      ]);
-
-      let balanceMessage = `
-💰 **Your Complete Balances:**
-**Address:** \`${session.walletAddress}\`
------------------------------------
-`;
-      balanceMessage += `**BNB Wallet:** \`${onChainBalance} BNB\`\n`;
-      balanceMessage += `**Spot Account:**\n`;
-
-      if (Object.keys(spotBalances).length > 0) {
-          for (const asset in spotBalances) {
-              balanceMessage += `  - \`${spotBalances[asset].toFixed(4)} ${asset}\`\n`;
-          }
-      } else {
-          balanceMessage += `  - \`Empty\`\n`;
-      }
-      balanceMessage += `-----------------------------------\n`;
-      balanceMessage += `**Futures Account:**\n`;
-      balanceMessage += `  - **Available:** \`${futuresBalance.available} USDT\`\n`;
-      balanceMessage += `  - **Total Margin:** \`${futuresBalance.total} USDT\`\n`;
-
-      await ctx.reply(balanceMessage, { parse_mode: 'Markdown' });
-
-  } catch (error) {
-      console.error('❌ [DEBUG] Error in combined /balance callback:', error);
-      await ctx.reply(`❌ An error occurred while fetching balances: ${error.message}`);
-  }
-  return; // Stop further processing
-}
-    
-    if (data === 'menu_positions') {
-      await ctx.answerCbQuery();
-      console.log('📊 [DEBUG] Positions button clicked by user:', ctx.from.id);
-      try {
-        const session = userSessions.get(ctx.from.id);
-        if (!session?.isInitialized) {
-          return ctx.reply('Please use /start first to set up your account.');
-        }
-        
-        const positions = await asterAPI.getPositions(session.apiKey, session.apiSecret);
-        
-        if (positions.length === 0) {
-          return ctx.reply('No open positions found.');
-        }
-        
-        let positionsList = '📊 **Your Positions:**\n\n';
-        
-        positions.forEach(pos => {
-          const pnl = pos.unrealizedPnl >= 0 ? `+$${pos.unrealizedPnl}` : `-$${Math.abs(pos.unrealizedPnl)}`;
-          const pnlEmoji = pos.unrealizedPnl >= 0 ? '🟢' : '🔴';
-          
-          positionsList += `${pnlEmoji} **${pos.symbol}**\n`;
-          positionsList += `Size: ${pos.size} | Leverage: ${pos.leverage}x\n`;
-          positionsList += `Entry: $${pos.entryPrice} | Current: $${pos.markPrice}\n`;
-          positionsList += `PnL: ${pnl}\n\n`;
-        });
-        
-        await ctx.reply(positionsList, { parse_mode: 'Markdown' });
-      } catch (error) {
-        await ctx.reply(`❌ Unable to fetch positions: ${error.message}`);
-      }
-      return;
-    }
-    
-    if (data === 'menu_long') {
-      await ctx.answerCbQuery();
-      return startTradingFlow(ctx, 'long');
-    }
-    
-    if (data === 'menu_short') {
-      await ctx.answerCbQuery();
-      return startTradingFlow(ctx, 'short');
-    }
-    
-    if (data === 'menu_export') {
-      await ctx.answerCbQuery();
-      console.log('🔑 [DEBUG] Export button clicked by user:', ctx.from.id);
-      const userId = ctx.from.id;
-      const session = userSessions.get(userId);
-
-      if (!session?.isInitialized || !session.privateKey) {
-        return ctx.reply('Please use /start first to generate a wallet.');
-      }
-
-      const warningMessage = `
-⚠️ **SECURITY WARNING** ⚠️
-
-You are about to view your wallet's private key.
-
-- **NEVER** share this key with anyone.
-- Anyone with this key has **FULL and IRREVERSIBLE CONTROL** over all funds in this wallet.
-- We strongly recommend you import this key into a secure, self-custodial wallet (like MetaMask or Trust Wallet) immediately.
-
-Do you understand the risks and wish to proceed?
-      `;
-
-      // Create a confirmation keyboard
-      const keyboard = Markup.inlineKeyboard([
-        Markup.button.callback('✅ Yes, export my key', 'export_confirm_yes'),
-        Markup.button.callback('❌ Cancel', 'export_confirm_no')
-      ]);
-
-      await ctx.reply(warningMessage, { parse_mode: 'Markdown', ...keyboard });
-      return;
-    }
-    
-    if (data === 'menu_markets') {
-      await ctx.answerCbQuery();
-      console.log('📋 [DEBUG] Markets button clicked by user:', ctx.from.id);
-      try {
-        const markets = await asterAPI.getMarkets();
-        
-        // Create pagination with 4 rows x 5 columns = 20 markets per page
-        const marketsPerPage = 20;
-        const totalPages = Math.ceil(markets.length / marketsPerPage);
-        const currentPage = 0;
-        const startIndex = currentPage * marketsPerPage;
-        const endIndex = Math.min(startIndex + marketsPerPage, markets.length);
-        const currentMarkets = markets.slice(startIndex, endIndex);
-        
-        // Create 4x5 grid (4 rows, 5 columns) with full button text
-        const keyboard = [];
-        for (let i = 0; i < currentMarkets.length; i += 5) {
-          const row = currentMarkets.slice(i, i + 5).map(market => {
-            // Use full symbol text since we have more space
-            return Markup.button.callback(market.symbol, `market_info_${market.symbol}`);
-          });
-          keyboard.push(row);
-        }
-        
-        // Add navigation buttons
-        const navButtons = [];
-        if (totalPages > 1) {
-          if (currentPage > 0) {
-            navButtons.push(Markup.button.callback('⬅️ Previous', `markets_view_page_${currentPage - 1}`));
-          }
-          navButtons.push(Markup.button.callback(`Page ${currentPage + 1}/${totalPages}`, 'markets_info'));
-          if (currentPage < totalPages - 1) {
-            navButtons.push(Markup.button.callback('Next ➡️', `markets_view_page_${currentPage + 1}`));
-          }
-          keyboard.push(navButtons);
-        }
-        
-        // Add back button
-        keyboard.push([Markup.button.callback('🔙 Back to Menu', 'back_to_menu')]);
-        
-        const message = `📈 **Available Crypto Markets (${startIndex + 1}-${endIndex} of ${markets.length}):**\n\nClick on any market to see more details:`;
-        
-        await ctx.reply(message, Markup.inlineKeyboard(keyboard));
-      } catch (error) {
-        await ctx.reply(`❌ Unable to fetch markets: ${error.message}`);
-      }
-      return;
-    }
-    
-    if (data === 'menu_close') {
-      await ctx.answerCbQuery();
-      console.log('❌ [DEBUG] Close button clicked by user:', ctx.from.id);
-      try {
-        const session = userSessions.get(ctx.from.id);
-        if (!session?.isInitialized) {
-          return ctx.reply('Please use /start first to set up your account.');
-        }
-        
-        const positions = await asterAPI.getPositions(session.apiKey, session.apiSecret);
-        
-        if (positions.length === 0) {
-          return ctx.reply('No open positions to close.');
-        }
-        
-        const keyboard = positions.map(pos => 
-          [Markup.button.callback(`${pos.symbol} (${pos.size})`, `close_${pos.id}`)]
-        );
-        
-        await ctx.reply(
-          '🔒 **Close Position**\n\nSelect position to close:',
-          Markup.inlineKeyboard(keyboard)
-        );
-      } catch (error) {
-        await ctx.reply(`❌ Unable to fetch positions: ${error.message}`);
-      }
-      return;
-    }
-    
-    if (data === 'menu_transfer') {
-      await ctx.answerCbQuery();
-      await ctx.reply('💸 **Transfer Funds**\n\nTo transfer funds, use the command:\n`/transfer [amount] [asset]`\n\nExample: `/transfer 25 USDT`', { parse_mode: 'Markdown' });
-    }
-    
-    
-    return;
-  }
-
-  // Handle pagination and navigation callbacks
-  if (data.startsWith('markets_page_')) {
-    const page = parseInt(data.replace('markets_page_', ''));
-    const session = userSessions.get(userId);
-    if (!session?.tradingFlow) return;
-    
+  // --- Main Menu Buttons ---
+  if (data === 'menu_balance') {
     await ctx.answerCbQuery();
-    
-    // Update the page in the trading flow
-    session.tradingFlow.page = page;
-    userSessions.set(userId, session);
-    
-    // Get markets and create pagination
-    const markets = await asterAPI.getMarkets();
-    const marketsPerPage = 20;
-    const totalPages = Math.ceil(markets.length / marketsPerPage);
-    const startIndex = page * marketsPerPage;
-    const endIndex = Math.min(startIndex + marketsPerPage, markets.length);
-    const currentMarkets = markets.slice(startIndex, endIndex);
-    
-    // Create 4x5 grid with full button text
-    const keyboard = [];
-    for (let i = 0; i < currentMarkets.length; i += 5) {
-      const row = currentMarkets.slice(i, i + 5).map(market => {
-        // Use full symbol text since we have more space
-        return Markup.button.callback(market.symbol, `select_asset_${market.symbol}`);
-      });
-      keyboard.push(row);
-    }
-    
-    // Add navigation buttons
-    const navButtons = [];
-    if (totalPages > 1) {
-      if (page > 0) {
-        navButtons.push(Markup.button.callback('⬅️ Previous', `markets_page_${page - 1}`));
-      }
-      navButtons.push(Markup.button.callback(`Page ${page + 1}/${totalPages}`, 'markets_info'));
-      if (page < totalPages - 1) {
-        navButtons.push(Markup.button.callback('Next ➡️', `markets_page_${page + 1}`));
-      }
-      keyboard.push(navButtons);
-    }
-    
-    // Add back button
-    keyboard.push([Markup.button.callback('🔙 Back to Menu', 'back_to_menu')]);
-    
-    const tradeType = session.tradingFlow.type;
-    const message = tradeType === 'long' 
-        ? `📈 **Open Long Position**\n\nSelect the asset (${startIndex + 1}-${endIndex} of ${markets.length}):` 
-        : `📉 **Open Short Position**\n\nSelect the asset (${startIndex + 1}-${endIndex} of ${markets.length}):`;
-    
-    await ctx.editMessageText(message, Markup.inlineKeyboard(keyboard));
-    return;
+    return handleBalanceRequest(ctx);
   }
-  
-  if (data === 'markets_info') {
-    await ctx.answerCbQuery('Use the navigation buttons to browse through all available markets!');
-    return;
-  }
-  
-  if (data.startsWith('markets_view_page_')) {
-    const page = parseInt(data.replace('markets_view_page_', ''));
+  if (data === 'menu_positions') {
     await ctx.answerCbQuery();
-    
-    try {
-      const markets = await asterAPI.getMarkets();
-      const marketsPerPage = 20;
-      const totalPages = Math.ceil(markets.length / marketsPerPage);
-      const startIndex = page * marketsPerPage;
-      const endIndex = Math.min(startIndex + marketsPerPage, markets.length);
-      const currentMarkets = markets.slice(startIndex, endIndex);
-      
-      // Create 4x5 grid with full button text
-      const keyboard = [];
-      for (let i = 0; i < currentMarkets.length; i += 5) {
-        const row = currentMarkets.slice(i, i + 5).map(market => {
-          // Use full symbol text since we have more space
-          return Markup.button.callback(market.symbol, `market_info_${market.symbol}`);
-        });
-        keyboard.push(row);
-      }
-      
-      // Add navigation buttons
-      const navButtons = [];
-      if (totalPages > 1) {
-        if (page > 0) {
-          navButtons.push(Markup.button.callback('⬅️ Previous', `markets_view_page_${page - 1}`));
-        }
-        navButtons.push(Markup.button.callback(`Page ${page + 1}/${totalPages}`, 'markets_info'));
-        if (page < totalPages - 1) {
-          navButtons.push(Markup.button.callback('Next ➡️', `markets_view_page_${page + 1}`));
-        }
-        keyboard.push(navButtons);
-      }
-      
-      // Add back button
-      keyboard.push([Markup.button.callback('🔙 Back to Menu', 'back_to_menu')]);
-      
-      const message = `📈 **Available Crypto Markets (${startIndex + 1}-${endIndex} of ${markets.length}):**\n\nClick on any market to see more details:`;
-      
-      await ctx.editMessageText(message, Markup.inlineKeyboard(keyboard));
-    } catch (error) {
-      await ctx.reply(`❌ Unable to fetch markets: ${error.message}`);
-    }
-    return;
+    return bot.handleUpdate({ message: { text: '/positions', from: ctx.from } });
   }
-  
-  if (data.startsWith('market_info_')) {
-    const symbol = data.replace('market_info_', '');
+  if (data === 'menu_long') {
     await ctx.answerCbQuery();
-    
-    try {
-      // Get price info for the selected market
-      const session = userSessions.get(userId);
-      if (!session?.isInitialized) {
-        return ctx.reply('Please use /start first to set up your account.');
-      }
-      
-      const price = await asterAPI.getPrice(session.apiKey, session.apiSecret, symbol);
-      
-      const priceMessage = `
-📊 **${symbol} Market Info**
-
-**Current Price:** $${price.price}
-**24h Change:** ${price.change24h}%
-**24h High:** $${price.high24h}
-**24h Low:** $${price.low24h}
-**24h Volume:** $${price.volume24h}
-
-💡 **Tip:** Use /long or /short to trade this pair!
-      `;
-      
-      const keyboard = Markup.inlineKeyboard([
-        [
-          Markup.button.callback('📈 Trade Long', `trade_long_${symbol}`),
-          Markup.button.callback('📉 Trade Short', `trade_short_${symbol}`)
-        ],
-        [Markup.button.callback('🔙 Back to Markets', 'menu_markets')]
-      ]);
-      
-      await ctx.reply(priceMessage, { parse_mode: 'Markdown', ...keyboard });
-    } catch (error) {
-      await ctx.reply(`❌ Unable to fetch market info for ${symbol}: ${error.message}`);
-    }
-    return;
+    return startTradingFlow(ctx, 'long');
   }
-  
-  if (data.startsWith('trade_long_')) {
-    const symbol = data.replace('trade_long_', '');
+  if (data === 'menu_short') {
     await ctx.answerCbQuery();
-    
-    // Initialize trading flow and set the selected asset
-    const session = userSessions.get(userId);
-    if (!session?.isInitialized) {
-      return ctx.reply('Please use /start first to set up your account.');
-    }
-    
-    session.tradingFlow = { type: 'long', step: 'enter_size', asset: symbol, page: 0 };
-    userSessions.set(userId, session);
-    
-    await ctx.reply(`📈 **Open Long Position - ${symbol}**\n\nEnter position size (in USDT):`);
-    return;
+    return startTradingFlow(ctx, 'short');
   }
-  
-  if (data.startsWith('trade_short_')) {
-    const symbol = data.replace('trade_short_', '');
+  if (data === 'menu_deposit') {
     await ctx.answerCbQuery();
-    
-    // Initialize trading flow and set the selected asset
-    const session = userSessions.get(userId);
-    if (!session?.isInitialized) {
-      return ctx.reply('Please use /start first to set up your account.');
-    }
-    
-    session.tradingFlow = { type: 'short', step: 'enter_size', asset: symbol, page: 0 };
-    userSessions.set(userId, session);
-    
-    await ctx.reply(`📉 **Open Short Position - ${symbol}**\n\nEnter position size (in USDT):`);
-    return;
+    return ctx.reply('To deposit, use the command: `/deposit <amount>`\nExample: `/deposit 50`', { parse_mode: 'Markdown' });
   }
-  
+  if (data === 'menu_transfer') {
+    await ctx.answerCbQuery();
+    return ctx.reply('To transfer, use the command: `/transfer <amount> <asset>`\nExample: `/transfer 25 USDT`', { parse_mode: 'Markdown' });
+  }
+  if (data === 'menu_markets') {
+    await ctx.answerCbQuery();
+    return bot.handleUpdate({ message: { text: '/markets', from: ctx.from } });
+  }
+  if (data === 'menu_close') {
+    await ctx.answerCbQuery();
+    return bot.handleUpdate({ message: { text: '/close', from: ctx.from } });
+  }
+  if (data === 'menu_export') {
+    await ctx.answerCbQuery();
+    return bot.handleUpdate({ message: { text: '/export', from: ctx.from } });
+  }
   if (data === 'back_to_menu') {
     await ctx.answerCbQuery();
-    // Reset trading flow and show main menu
-    const session = userSessions.get(userId);
     if (session) {
       session.tradingFlow = null;
       userSessions.set(userId, session);
     }
-    
-    // Show main menu
-    const menuKeyboard = Markup.inlineKeyboard([
-      [
-        Markup.button.callback('💰 Balance', 'menu_balance'),
-        Markup.button.callback('📊 Positions', 'menu_positions')
-      ],
-      [
-        Markup.button.callback('📈 Long Position', 'menu_long'),
-        Markup.button.callback('📉 Short Position', 'menu_short')
-      ],
-      [
-        Markup.button.callback('💸 Transfer Funds', 'menu_transfer'),
-        Markup.button.callback('🔑 Export Key', 'menu_export')
-      ],
-      [
-        Markup.button.callback('📋 Markets', 'menu_markets'),
-        Markup.button.callback('❌ Close Position', 'menu_close')
-      ]
-    ]);
-
-    const menuMessage = `
-🎯 **AsterDex Trading Bot - Main Menu**
-
-**Wallet:** \`${session?.walletAddress || 'Not initialized'}\`
-
-Choose an action from the menu below or use commands directly:
-• Type /long or /short to trade
-• Type /transfer 25 USDT to transfer funds
-• Type /balance to check your balance
-• Type /export to export your private key
-
-💡 **Tip:** You can use both buttons and commands!
-    `;
-
-    await ctx.editMessageText(menuMessage, { 
-      parse_mode: 'Markdown', 
-      ...menuKeyboard 
-    });
-    return;
+    return showMainMenu(ctx);
   }
 
-  // Handle callbacks that are NOT part of the trading flow
-  if (data.startsWith('export_confirm_')) {
-      if (data === 'export_confirm_yes') {
-          if (!session?.isInitialized || !session.privateKey) {
-              return ctx.answerCbQuery('Please use /start first to generate a wallet.', { show_alert: true });
-          }
-          
-          await ctx.answerCbQuery();
-          await ctx.editMessageText(
-              `🔑 **Your Private Key:**\n\n\`${session.privateKey}\`\n\n⚠️ **IMPORTANT:** Keep this key safe and never share it with anyone!`,
-              { parse_mode: 'Markdown' }
-          );
-      } else if (data === 'export_confirm_no') {
-          await ctx.answerCbQuery();
-          await ctx.editMessageText('❌ Private key export cancelled.');
-      }
-      return;
+  // --- Export Confirmation Flow ---
+  if (data === 'export_confirm_yes') {
+    await ctx.answerCbQuery();
+    const decryptedKey = decrypt(session.privateKey); // Assuming you've implemented encryption
+    return ctx.editMessageText(`🔑 **Your Private Key:**\n\n\`${decryptedKey}\`\n\n⚠️ Keep this safe!`, { parse_mode: 'Markdown' });
   }
-  
-  if (data.startsWith('close_')) {
-      const positionSymbol = data.replace('close_', '');
-      try {
-          await ctx.answerCbQuery();
-          await ctx.editMessageText(`Closing position for ${positionSymbol}...`);
-          
-          const result = await asterAPI.closePosition(session.apiKey, session.apiSecret, positionSymbol);
-          
-          await ctx.editMessageText(
-              `✅ **Position Closed!**\n\n` +
-              `**Symbol:** ${positionSymbol}\n` +
-              `**Order ID:** \`${result.orderId}\`\n` +
-              `**Status:** ${result.status}`,
-              { parse_mode: 'Markdown' }
-          );
-      } catch (error) {
-          await ctx.editMessageText(`❌ Failed to close position: ${error.message}`);
-      }
-      return;
+  if (data === 'export_confirm_no') {
+    await ctx.answerCbQuery();
+    return ctx.editMessageText('❌ Private key export cancelled.');
   }
 
-  if (!session || !session.tradingFlow) {
-      return ctx.answerCbQuery('Session expired. Please start a new command.');
-  }
-
-  // --- MAIN TRADING FLOW LOGIC ---
+  // --- Trading Flow (Asset Selection, Leverage, etc.) ---
   try {
-      const flow = session.tradingFlow;
+    const flow = session.tradingFlow;
+    if (!flow) return ctx.answerCbQuery('This action has expired. Please start again.', { show_alert: true });
 
-      if (flow.step === 'select_asset' && data.startsWith('select_asset_')) {
-          flow.asset = data.replace('select_asset_', '');
-          flow.step = 'enter_size';
-          await ctx.answerCbQuery();
-          await ctx.editMessageText(`Selected: **${flow.asset}**\n\nEnter position size (in USDT):`, { parse_mode: 'Markdown' });
-      }
-      
-      else if (flow.step === 'enter_leverage' && data.startsWith('leverage_')) {
-          flow.leverage = parseInt(data.replace('leverage_', ''));
-          flow.step = 'confirm';
-          const confirmKeyboard = Markup.inlineKeyboard([
-              Markup.button.callback('✅ Confirm Trade', 'confirm_trade'),
-              Markup.button.callback('❌ Cancel', 'cancel_trade')
-          ]);
-          await ctx.answerCbQuery();
-          await ctx.editMessageText(
-              `📋 **Trade Confirmation:**\n\n` +
-              `**Asset:** ${flow.asset}\n` +
-              `**Side:** ${flow.type.toUpperCase()}\n` +
-              `**Size:** ${flow.size} USDT\n` +
-              `**Leverage:** ${flow.leverage}x`,
-              { parse_mode: 'Markdown', ...confirmKeyboard }
-          );
-      }
-
-      else if (flow.step === 'confirm' && data === 'confirm_trade') {
-          await ctx.answerCbQuery();
-          await ctx.editMessageText('Processing your trade...');
-          const result = await asterAPI.placeOrder(session.apiKey, session.apiSecret, {
-              symbol: flow.asset, side: flow.type, size: flow.size, leverage: flow.leverage
-          });
-          session.tradingFlow = null; // End the flow
-          await ctx.editMessageText(
-              `✅ **Trade Executed!**\n\n` +
-              `**Order ID:** \`${result.orderId}\`\n` +
-              `**Symbol:** ${result.symbol}\n` +
-              `**Side:** ${result.side}\n` +
-              `**Quantity:** ${parseFloat(result.origQty).toFixed(5)}`,
-              { parse_mode: 'Markdown' }
-          );
-      }
-
-      else if (data === 'cancel_trade') {
-          session.tradingFlow = null; // End the flow
-          await ctx.answerCbQuery();
-          await ctx.editMessageText('❌ Trade cancelled.');
-      }
-
+    if (flow.step === 'select_asset' && data.startsWith('select_asset_')) {
+        flow.asset = data.replace('select_asset_', '');
+        flow.step = 'enter_size';
+        await ctx.answerCbQuery();
+        await ctx.editMessageText(`Selected: **${flow.asset}**\n\nEnter position size (in USDT):`, { parse_mode: 'Markdown' });
+    } else if (flow.step === 'enter_leverage' && data.startsWith('leverage_')) {
+        flow.leverage = parseInt(data.replace('leverage_', ''));
+        flow.step = 'confirm';
+        const confirmKeyboard = Markup.inlineKeyboard([
+            Markup.button.callback('✅ Confirm Trade', 'confirm_trade'),
+            Markup.button.callback('❌ Cancel', 'cancel_trade')
+        ]);
+        await ctx.answerCbQuery();
+        await ctx.editMessageText(
+            `📋 **Trade Confirmation:**\n\n` +
+            `**Asset:** ${flow.asset}\n` +
+            `**Side:** ${flow.type.toUpperCase()}\n` +
+            `**Size:** ${flow.size} USDT\n` +
+            `**Leverage:** ${flow.leverage}x`,
+            { parse_mode: 'Markdown', ...confirmKeyboard }
+        );
+    } else if (flow.step === 'confirm' && data === 'confirm_trade') {
+        await ctx.answerCbQuery();
+        await ctx.editMessageText('Processing your trade...');
+        const result = await asterAPI.placeOrder(session.apiKey, session.apiSecret, {
+            symbol: flow.asset, side: flow.type, size: flow.size, leverage: flow.leverage
+        });
+        session.tradingFlow = null; // End the flow
+        await ctx.editMessageText(
+            `✅ **Trade Executed!**\n\n` +
+            `**Order ID:** \`${result.orderId}\`\n` +
+            `**Symbol:** ${result.symbol}\n` +
+            `**Side:** ${result.side}\n` +
+            `**Quantity:** ${parseFloat(result.origQty).toFixed(5)}`,
+            { parse_mode: 'Markdown' }
+        );
+    } else if (data === 'cancel_trade') {
+        session.tradingFlow = null; // End the flow
+        await ctx.answerCbQuery();
+        await ctx.editMessageText('❌ Trade cancelled.');
+    }
   } catch (error) {
-      session.tradingFlow = null; // End the flow on error
-      await ctx.answerCbQuery('An error occurred.', { show_alert: true });
-      await ctx.reply(`❌ Error during trade: ${error.message}`);
+    if (session) session.tradingFlow = null; // End the flow on error
+    await ctx.answerCbQuery('An error occurred.', { show_alert: true });
+    await ctx.reply(`❌ Error during trade: ${error.message}`);
   }
 });
 
@@ -1204,7 +942,15 @@ bot.on('text', async (ctx) => {
   }
   
   const userId = ctx.from.id;
-  const session = userSessions.get(userId);
+  let session = userSessions.get(userId);
+
+  // If session is not in memory, try loading it from the database
+  if (!session) {
+    session = await loadUserSession(userId);
+    if (session) {
+      userSessions.set(userId, session); // Add to memory for faster access next time
+    }
+  }
 
   // This code only runs if the user is in the middle of a trade and needs to enter a size
   if (session?.tradingFlow?.step === 'enter_size') {
@@ -1255,10 +1001,31 @@ bot.on('text', async (ctx) => {
   }
 });
 
+try {
+  await bot.telegram.setMyCommands([
+    { command: 'start', description: 'Start the bot & get your wallet' },
+    { command: 'menu', description: 'Show the main interactive menu' },
+    { command: 'balance', description: 'Check all account balances' },
+    { command: 'deposit', description: 'Deposit USDT from wallet to exchange' },
+    { command: 'transfer', description: 'Transfer funds from Spot to Futures' },
+    { command: 'long', description: 'Open a long position' },
+    { command: 'short', description: 'Open a short position' },
+    { command: 'positions', description: 'View your open positions' },
+    { command: 'close', description: 'Close an open position' },
+    { command: 'export', description: 'Export your wallet\'s private key' },
+    { command: 'cancel', description: 'Cancel the current action' },
+    { command: 'help', description: 'Show this help message' },
+  ]);
+  console.log('✅ [DEBUG] Bot command menu has been set.');
+} catch (error) {
+  console.error('❌ [DEBUG] Failed to set bot command menu:', error);
+}
+
 console.log('🚀 [DEBUG] Starting bot launch...');
 bot.launch().then(() => {
   console.log('🚀 [DEBUG] AsterDex Multi-User Bot started successfully!');
   console.log('✅ [DEBUG] Bot is ready to receive commands');
+  startKeepAliveServer();
 }).catch((error) => {
   console.error('❌ [DEBUG] Bot launch failed:', error);
   console.error('❌ [DEBUG] Launch error stack:', error.stack);

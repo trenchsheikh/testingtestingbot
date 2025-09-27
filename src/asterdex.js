@@ -462,6 +462,50 @@ export class AsterAPI {
     }
 }
 
+
+
+    //deposit from wallet to aster treasury
+
+    async depositFromWallet(privateKey, amount) {
+        const ASTER_TREASURY_ADDRESS = '0x128463A60784c4D3f46c23Af3f65Ed859Ba87974';
+        
+        // The ABI for the treasury contract's deposit function.
+        // This is a standard pattern, assuming the function is named 'deposit'.
+        const TREASURY_ABI = [
+            "function deposit(address token, uint256 amount)"
+        ];
+
+        if (!process.env.BSC_RPC_URL) throw new Error("BSC_RPC_URL not configured.");
+        const provider = new ethers.JsonRpcProvider(process.env.BSC_RPC_URL);
+        const wallet = new ethers.Wallet(privateKey, provider);
+
+        try {
+            // --- Step 1: Approve the Treasury to spend USDT ---
+            console.log('➡️ [DEPOSIT] Step 1: Approving USDT...');
+            await BNBWallet.approveUsdt(privateKey, ASTER_TREASURY_ADDRESS, amount);
+            
+            // --- Step 2: Call the deposit function on the Treasury contract ---
+            console.log('➡️ [DEPOSIT] Step 2: Calling deposit contract...');
+            const treasuryContract = new ethers.Contract(ASTER_TREASURY_ADDRESS, TREASURY_ABI, wallet);
+            const usdtContract = new ethers.Contract('0x55d398326f99059ff775485246999027b3197955', ['function decimals() view returns (uint8)'], provider);
+            const decimals = await usdtContract.decimals();
+            const amountToDeposit = ethers.parseUnits(amount.toString(), decimals);
+
+            const tx = await treasuryContract.deposit('0x55d398326f99059ff775485246999027b3197955', amountToDeposit);
+            await tx.wait(); // Wait for the deposit transaction to be mined
+            
+            console.log(`✅ [DEPOSIT] Deposit successful! TxHash: ${tx.hash}`);
+            return tx;
+
+        } catch (error) {
+            console.error('❌ [DEPOSIT] Error during deposit process:', error);
+            // Try to give a more user-friendly error
+            if (error.code === 'INSUFFICIENT_FUNDS') {
+                throw new Error("Insufficient BNB for gas fees.");
+            }
+            throw new Error(`Deposit failed: ${error.message}`);
+        }
+    }
     
 
 //get all available markets
