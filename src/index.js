@@ -302,43 +302,58 @@ Do you understand the risks and wish to proceed?
 
 // Balance command
 bot.command('balance', async (ctx) => {
-  console.log('💰 [DEBUG] /balance command received from user:', ctx.from.id);
-  try {
-    const session = userSessions.get(ctx.from.id);
-    console.log('🔍 [DEBUG] Session exists:', !!session);
-    console.log('🔍 [DEBUG] Session initialized:', session?.isInitialized);
-    
-    if (!session?.isInitialized) {
-      console.log('❌ [DEBUG] User not initialized, returning error message');
-      return ctx.reply('Please use /start first to set up your account.');
-    }
+  console.log('💰 [DEBUG] /balance (all) command received from user:', ctx.from.id);
+  const session = userSessions.get(ctx.from.id);
+  
+  if (!session?.isInitialized) {
+    return ctx.reply('Please use /start first to set up your account.');
+  }
 
-    console.log('🔑 [DEBUG] User has API keys, fetching balance...');
-    console.log('🔑 [DEBUG] API Key exists:', !!session.apiKey);
-    console.log('🔑 [DEBUG] API Secret exists:', !!session.apiSecret);
-    
-    // Pass the user's unique keys to the API method
-    console.log('🌐 [DEBUG] Calling asterAPI.getAccountBalance...');
-    const futuresBalance = await asterAPI.getAccountBalance(session.apiKey, session.apiSecret);
-    console.log('✅ [DEBUG] Balance received:', futuresBalance);
-    
-    const balanceMessage = `
-💰 **Your Balances:**
-**Wallet:** \`${session.walletAddress}\`
-**Futures Account:** ${futuresBalance.available} USDT
-**Total Margin:** ${futuresBalance.total} USDT
-    `;
-    console.log('📤 [DEBUG] Sending balance message to user');
+  await ctx.reply('Hold on, fetching all your balances...');
+
+  try {
+    // Fetch all three balances in parallel for speed
+    const [onChainBalance, spotBalances, futuresBalance] = await Promise.all([
+      BNBWallet.getWalletBalance(session.walletAddress),
+      asterAPI.getSpotAccountBalance(session.apiKey, session.apiSecret),
+      asterAPI.getAccountBalance(session.apiKey, session.apiSecret)
+    ]);
+
+    // --- Build the response message ---
+    let balanceMessage = `
+💰 **Your Complete Balances:**
+**Address:** \`${session.walletAddress}\`
+-----------------------------------
+`;
+
+    // 1. On-Chain Wallet Balance
+    balanceMessage += `**BNB Wallet:** \`${onChainBalance} BNB\`\n`;
+
+    // 2. Spot Account Balances
+    balanceMessage += `**Spot Account:**\n`;
+    if (Object.keys(spotBalances).length > 0) {
+      for (const asset in spotBalances) {
+        balanceMessage += `  - \`${spotBalances[asset].toFixed(4)} ${asset}\`\n`;
+      }
+    } else {
+      balanceMessage += `  - \`Empty\`\n`;
+    }
+    balanceMessage += `-----------------------------------\n`;
+
+    // 3. Futures Account Balance
+    balanceMessage += `**Futures Account:**\n`;
+    balanceMessage += `  - **Available:** \`${futuresBalance.available} USDT\`\n`;
+    balanceMessage += `  - **Total Margin:** \`${futuresBalance.total} USDT\`\n`;
+
     await ctx.reply(balanceMessage, { parse_mode: 'Markdown' });
-    console.log('✅ [DEBUG] Balance message sent successfully');
+
   } catch (error) {
-    console.error('❌ [DEBUG] Error in /balance command:', error);
-    console.error('❌ [DEBUG] Error stack:', error.stack);
-    await ctx.reply(`❌ Unable to fetch balance: ${error.message}`);
+    console.error('❌ [DEBUG] Error in combined /balance command:', error);
+    await ctx.reply(`❌ An error occurred while fetching balances: ${error.message}`);
   }
 });
 
-// Add this entire function to the end of src/index.js, before bot.launch()
+
 
 // Register command handlers FIRST
 bot.command('long', (ctx) => {
@@ -397,110 +412,9 @@ Your funds are now available in your futures account for trading.
 console.log('✅ [DEBUG] All command handlers registered');
 
 // Handle text messages for position size and dynamic leverage
-bot.on('text', async (ctx) => {
-  console.log('📝 [DEBUG] Text message received:', ctx.message.text, 'from user:', ctx.from.id);
-  
-  // Skip if this is a command (starts with /)
-  if (ctx.message.text.startsWith('/')) {
-    console.log('⚠️ [DEBUG] Skipping command in text handler:', ctx.message.text);
-    return;
-  }
-  
-  const userId = ctx.from.id;
-  const session = userSessions.get(userId);
 
-  // This code only runs if the user is in the middle of a trade and needs to enter a size
-  if (session?.tradingFlow?.step === 'enter_size') {
-      try {
-          const size = parseFloat(ctx.message.text);
-          if (isNaN(size) || size <= 0) {
-              return ctx.reply('Invalid size. Please enter a positive number.');
-          }
 
-          session.tradingFlow.size = size;
-          session.tradingFlow.step = 'enter_leverage';
-          userSessions.set(userId, session);
 
-          const symbol = session.tradingFlow.asset;
-          await ctx.reply(`Fetching leverage options for ${symbol}...`);
-
-          // 1. Get the asset-specific max leverage
-          const maxLeverage = await asterAPI.getLeverageBrackets(session.apiKey, session.apiSecret, symbol);
-
-          // 2. Define all possible leverage steps
-          const allLeverageSteps = [2, 5, 10, 20, 25, 50, 75, 100, 125];
-
-          // 3. Filter to show only valid options for this specific asset
-          const validLeverageOptions = allLeverageSteps.filter(step => step <= maxLeverage);
-          
-          // 4. Dynamically create the keyboard with valid options
-          const leverageKeyboard = [];
-          for (let i = 0; i < validLeverageOptions.length; i += 3) {
-              leverageKeyboard.push(
-                  validLeverageOptions.slice(i, i + 3).map(leverage => 
-                      Markup.button.callback(`${leverage}x`, `leverage_${leverage}`)
-                  )
-              );
-          }
-          
-          await ctx.reply(
-              `Size: ${size} USDT\nMax Leverage for ${symbol}: **${maxLeverage}x**\n\nSelect your leverage:`,
-              {
-                  parse_mode: 'Markdown',
-                  ...Markup.inlineKeyboard(leverageKeyboard)
-              }
-          );
-      } catch (error) {
-          session.tradingFlow = null; // Reset flow on error
-          userSessions.set(userId, session);
-          await ctx.reply(`❌ Error: ${error.message}`);
-      }
-  }
-});
-
-// Transfer command - Transfer from spot to futures using v3 API
-bot.command('transfer', async (ctx) => {
-  console.log('🔄 [DEBUG] /transfer command received from user:', ctx.from.id);
-  try {
-    const args = ctx.message.text.split(' ');
-    const amount = args[1];
-    const asset = args[2] || 'USDT';
-    
-    if (!amount) {
-      return ctx.reply('Usage: /transfer [amount] [asset]\nExample: /transfer 25 USDT');
-    }
-
-    const userId = ctx.from.id;
-    const session = userSessions.get(userId);
-    
-    if (!session?.isInitialized) {
-      return ctx.reply('Please use /start first to initialize your account.');
-    }
-
-    const transferAmount = parseFloat(amount);
-    if (isNaN(transferAmount) || transferAmount <= 0) {
-      return ctx.reply('Invalid amount. Please enter a valid number.');
-    }
-
-    // Transfer from spot to futures using v3 API
-    const result = await asterAPI.transferSpotToFutures(session.apiKey, session.apiSecret, asset, transferAmount);
-    
-    const transferMessage = `
-✅ **Transfer Successful!**
-
-**Asset:** ${asset}
-**Amount:** ${transferAmount}
-**Transaction ID:** ${result.transactionId}
-**Status:** ${result.status}
-
-Your funds are now available in your futures account for trading.
-    `;
-
-    await ctx.reply(transferMessage, { parse_mode: 'Markdown' });
-  } catch (error) {
-    await ctx.reply(`❌ Transfer failed: ${error.message}`);
-  }
-});
 
 
 // Markets command
@@ -691,6 +605,40 @@ bot.command('close', async (ctx) => {
   }
 });
 
+// Spot balance command
+bot.command('spotbalance', async (ctx) => {
+  console.log('💳 [DEBUG] /spotbalance command received from user:', ctx.from.id);
+  try {
+    const session = userSessions.get(ctx.from.id);
+    if (!session?.isInitialized) {
+      return ctx.reply('Please use /start first to set up your account.');
+    }
+
+    await ctx.reply('Checking your Spot Account balance, please wait...');
+
+    // Call the existing function to get the Spot balance
+    const spotBalances = await asterAPI.getSpotAccountBalance(session.apiKey, session.apiSecret);
+
+    let balanceMessage = `
+💳 **Your Spot Account Balances:**
+**Wallet:** \`${session.walletAddress}\`
+\n`;
+
+    if (Object.keys(spotBalances).length > 0) {
+      for (const asset in spotBalances) {
+        balanceMessage += `**${asset}:** ${spotBalances[asset].toFixed(8)}\n`;
+      }
+    } else {
+      balanceMessage += 'Your spot account is currently empty. Deposits can take a few minutes to arrive after being confirmed on the blockchain.';
+    }
+
+    await ctx.reply(balanceMessage, { parse_mode: 'Markdown' });
+  } catch (error) {
+    console.error('❌ [DEBUG] Error in /spotbalance command:', error);
+    await ctx.reply(`❌ Unable to fetch spot balance: ${error.message}`);
+  }
+});
+
 // Handle callback queries for interactive flows
 bot.on('callback_query', async (ctx) => {
   const data = ctx.callbackQuery.data;
@@ -699,44 +647,55 @@ bot.on('callback_query', async (ctx) => {
 
   // Handle menu button callbacks
   if (data.startsWith('menu_')) {
-    if (data === 'menu_balance') {
-      await ctx.answerCbQuery();
-      console.log('💰 [DEBUG] Balance button clicked by user:', ctx.from.id);
-      try {
-        const session = userSessions.get(ctx.from.id);
-        console.log('🔍 [DEBUG] Session exists:', !!session);
-        console.log('🔍 [DEBUG] Session initialized:', session?.isInitialized);
-        
-        if (!session?.isInitialized) {
-          console.log('❌ [DEBUG] User not initialized, returning error message');
-          return ctx.reply('Please use /start first to set up your account.');
-        }
+    // THIS IS THE NEW, CORRECTED CODE
+    // THIS IS THE NEW, CORRECTED CODE
+if (data === 'menu_balance') {
+  await ctx.answerCbQuery();
+  console.log('💰 [DEBUG] Balance button (callback) received from user:', ctx.from.id);
+  
+  // Use the exact same logic as the /balance command
+  const session = userSessions.get(ctx.from.id);
+  if (!session?.isInitialized) {
+      return ctx.reply('Please use /start first to set up your account.');
+  }
 
-        console.log('🔑 [DEBUG] User has API keys, fetching balance...');
-        console.log('🔑 [DEBUG] API Key exists:', !!session.apiKey);
-        console.log('🔑 [DEBUG] API Secret exists:', !!session.apiSecret);
-        
-        // Pass the user's unique keys to the API method
-        console.log('🌐 [DEBUG] Calling asterAPI.getAccountBalance...');
-        const futuresBalance = await asterAPI.getAccountBalance(session.apiKey, session.apiSecret);
-        console.log('✅ [DEBUG] Balance received:', futuresBalance);
-        
-        const balanceMessage = `
-💰 **Your Balances:**
-**Wallet:** \`${session.walletAddress}\`
-**Futures Account:** ${futuresBalance.available} USDT
-**Total Margin:** ${futuresBalance.total} USDT
-        `;
-        console.log('📤 [DEBUG] Sending balance message to user');
-        await ctx.reply(balanceMessage, { parse_mode: 'Markdown' });
-        console.log('✅ [DEBUG] Balance message sent successfully');
-      } catch (error) {
-        console.error('❌ [DEBUG] Error in balance button:', error);
-        console.error('❌ [DEBUG] Error stack:', error.stack);
-        await ctx.reply(`❌ Unable to fetch balance: ${error.message}`);
+  await ctx.reply('Hold on, fetching all your balances...');
+
+  try {
+      const [onChainBalance, spotBalances, futuresBalance] = await Promise.all([
+          BNBWallet.getWalletBalance(session.walletAddress),
+          asterAPI.getSpotAccountBalance(session.apiKey, session.apiSecret),
+          asterAPI.getAccountBalance(session.apiKey, session.apiSecret)
+      ]);
+
+      let balanceMessage = `
+💰 **Your Complete Balances:**
+**Address:** \`${session.walletAddress}\`
+-----------------------------------
+`;
+      balanceMessage += `**BNB Wallet:** \`${onChainBalance} BNB\`\n`;
+      balanceMessage += `**Spot Account:**\n`;
+
+      if (Object.keys(spotBalances).length > 0) {
+          for (const asset in spotBalances) {
+              balanceMessage += `  - \`${spotBalances[asset].toFixed(4)} ${asset}\`\n`;
+          }
+      } else {
+          balanceMessage += `  - \`Empty\`\n`;
       }
-      return;
-    }
+      balanceMessage += `-----------------------------------\n`;
+      balanceMessage += `**Futures Account:**\n`;
+      balanceMessage += `  - **Available:** \`${futuresBalance.available} USDT\`\n`;
+      balanceMessage += `  - **Total Margin:** \`${futuresBalance.total} USDT\`\n`;
+
+      await ctx.reply(balanceMessage, { parse_mode: 'Markdown' });
+
+  } catch (error) {
+      console.error('❌ [DEBUG] Error in combined /balance callback:', error);
+      await ctx.reply(`❌ An error occurred while fetching balances: ${error.message}`);
+  }
+  return; // Stop further processing
+}
     
     if (data === 'menu_positions') {
       await ctx.answerCbQuery();
@@ -1232,6 +1191,67 @@ Choose an action from the menu below or use commands directly:
       session.tradingFlow = null; // End the flow on error
       await ctx.answerCbQuery('An error occurred.', { show_alert: true });
       await ctx.reply(`❌ Error during trade: ${error.message}`);
+  }
+});
+
+bot.on('text', async (ctx) => {
+  console.log('📝 [DEBUG] Text message received:', ctx.message.text, 'from user:', ctx.from.id);
+  
+  // Skip if this is a command (starts with /)
+  if (ctx.message.text.startsWith('/')) {
+    console.log('⚠️ [DEBUG] Skipping command in text handler:', ctx.message.text);
+    return;
+  }
+  
+  const userId = ctx.from.id;
+  const session = userSessions.get(userId);
+
+  // This code only runs if the user is in the middle of a trade and needs to enter a size
+  if (session?.tradingFlow?.step === 'enter_size') {
+      try {
+          const size = parseFloat(ctx.message.text);
+          if (isNaN(size) || size <= 0) {
+              return ctx.reply('Invalid size. Please enter a positive number.');
+          }
+
+          session.tradingFlow.size = size;
+          session.tradingFlow.step = 'enter_leverage';
+          userSessions.set(userId, session);
+
+          const symbol = session.tradingFlow.asset;
+          await ctx.reply(`Fetching leverage options for ${symbol}...`);
+
+          // 1. Get the asset-specific max leverage
+          const maxLeverage = await asterAPI.getLeverageBrackets(session.apiKey, session.apiSecret, symbol);
+
+          // 2. Define all possible leverage steps
+          const allLeverageSteps = [2, 5, 10, 20, 25, 50, 75, 100, 125];
+
+          // 3. Filter to show only valid options for this specific asset
+          const validLeverageOptions = allLeverageSteps.filter(step => step <= maxLeverage);
+          
+          // 4. Dynamically create the keyboard with valid options
+          const leverageKeyboard = [];
+          for (let i = 0; i < validLeverageOptions.length; i += 3) {
+              leverageKeyboard.push(
+                  validLeverageOptions.slice(i, i + 3).map(leverage => 
+                      Markup.button.callback(`${leverage}x`, `leverage_${leverage}`)
+                  )
+              );
+          }
+          
+          await ctx.reply(
+              `Size: ${size} USDT\nMax Leverage for ${symbol}: **${maxLeverage}x**\n\nSelect your leverage:`,
+              {
+                  parse_mode: 'Markdown',
+                  ...Markup.inlineKeyboard(leverageKeyboard)
+              }
+          );
+      } catch (error) {
+          session.tradingFlow = null; // Reset flow on error
+          userSessions.set(userId, session);
+          await ctx.reply(`❌ Error: ${error.message}`);
+      }
   }
 });
 

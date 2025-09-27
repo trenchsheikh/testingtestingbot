@@ -1,11 +1,17 @@
-
 import { ethers } from 'ethers';
+
+// Retrieve the RPC URL from environment variables
+const BSC_RPC_URL = process.env.BSC_RPC_URL;
+if (!BSC_RPC_URL) {
+  console.warn('⚠️ WARNING: BSC_RPC_URL is not set in .env. On-chain balance checks will fail.');
+}
+
+// Initialize the provider once
+const provider = BSC_RPC_URL ? new ethers.JsonRpcProvider(BSC_RPC_URL) : null;
 
 export class BNBWallet {
   /**
    * Creates a new, random BEP-20 (EVM) wallet.
-   * This is a static method, so you don't need to create an instance of BNBWallet to use it.
-   * @returns {{address: string, privateKey: string}} The new wallet's address and private key.
    */
   static createWallet() {
     const wallet = ethers.Wallet.createRandom();
@@ -18,12 +24,30 @@ export class BNBWallet {
 
   /**
    * Signs a message with a given private key.
-   * @param {string} privateKey - The private key to sign with.
-   * @param {string} message - The message to sign.
-   * @returns {Promise<string>} The resulting signature.
    */
   static async signMessage(privateKey, message) {
     const wallet = new ethers.Wallet(privateKey);
     return await wallet.signMessage(message);
+  }
+
+  /**
+   * --- NEW FUNCTION ---
+   * Gets the on-chain BNB balance for a given wallet address.
+   * @param {string} address - The wallet address to check.
+   * @returns {Promise<string>} The formatted BNB balance as a string.
+   */
+  static async getWalletBalance(address) {
+    if (!provider) {
+        console.error('❌ Cannot get wallet balance because BSC_RPC_URL is not configured.');
+        return '0.00'; // Return a default value if the provider is not available
+    }
+    try {
+        const balanceWei = await provider.getBalance(address);
+        // Format the balance from Wei to BNB, showing about 6 decimal places
+        return parseFloat(ethers.formatEther(balanceWei)).toFixed(6);
+    } catch (error) {
+        console.error('❌ Error fetching on-chain wallet balance:', error);
+        return 'Error';
+    }
   }
 }

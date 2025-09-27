@@ -415,54 +415,52 @@ export class AsterAPI {
     }
 
     // Get spot account balance
-    async getSpotAccountBalance(apiKey, apiSecret) {
-        try {
-            console.log('💳 Fetching spot account balance...');
-            const params = {
-                recvWindow: 5000,
-                timestamp: Date.now()
-            };
-            console.log('📋 Spot params:', params);
-            
-            const sortedParams = Object.keys(params).sort().map(key => `${key}=${params[key]}`).join('&');
-            console.log('🔗 Sorted params string:', sortedParams);
-            
-            const signature = this.generateHmacSignature(sortedParams, apiSecret);
-            console.log('🔐 HMAC signature:', signature);
-            
-            const finalQueryString = `${sortedParams}&signature=${signature}`;
-            console.log('📤 Final query string:', finalQueryString);
-            
-            console.log('🌐 Making GET request to /api/v1/account');
-            const response = await this.spotClient.get(`/api/v1/account?${finalQueryString}`, {
-                headers: {
-                    'X-MBX-APIKEY': apiKey,
-                    'Content-Type': 'application/x-www-form-urlencoded'
-                }
-            });
-            
-            console.log('✅ Spot balance response status:', response.status);
-            console.log('📊 Spot balance response data:', response.data);
-            
-            // Format balances for easy access
-            const balances = {};
-            if (response.data.balances) {
-                response.data.balances.forEach(balance => {
-                    balances[balance.asset] = parseFloat(balance.free) + parseFloat(balance.locked);
-                });
+  // REPLACE this entire function in src/asterdex.js
+
+  async getSpotAccountBalance(apiKey, apiSecret) {
+    try {
+        console.log('💳 Fetching spot account balance...');
+        const params = {
+            recvWindow: 5000,
+            timestamp: Date.now()
+        };
+        
+        const sortedParams = Object.keys(params).sort().map(key => `${key}=${params[key]}`).join('&');
+        const signature = this.generateHmacSignature(sortedParams, apiSecret);
+        const finalQueryString = `${sortedParams}&signature=${signature}`;
+        
+        console.log('🌐 Making GET request to /api/v1/account');
+        const response = await this.spotClient.get(`/api/v1/account?${finalQueryString}`, {
+            headers: {
+                'X-MBX-APIKEY': apiKey
+                // 'Content-Type' header removed from here
             }
-            
-            console.log('💳 Processed spot balances:', balances);
-            return balances;
-        } catch (error) {
-            console.error('❌ getSpotAccountBalance error:', error);
-            console.error('❌ Error response:', error.response?.data);
-            console.error('❌ Error status:', error.response?.status);
-            console.error('❌ Error headers:', error.response?.headers);
-            console.error('❌ Error stack:', error.stack);
-            throw new Error(`Unable to fetch spot account balance: ${error.message}`);
+        });
+        
+        console.log('✅ Spot balance response status:', response.status);
+        
+        const balances = {};
+        if (response.data.balances) {
+            // Filter for assets with a balance greater than 0
+            const fundedBalances = response.data.balances.filter(balance => {
+                const free = parseFloat(balance.free);
+                const locked = parseFloat(balance.locked);
+                return (free + locked) > 0;
+            });
+
+            fundedBalances.forEach(balance => {
+                balances[balance.asset] = parseFloat(balance.free); // Show only available balance
+            });
         }
+        
+        console.log('💳 Processed spot balances:', balances);
+        return balances;
+
+    } catch (error) {
+        console.error('❌ getSpotAccountBalance error:', error.response?.data || error.message);
+        throw new Error(`Unable to fetch spot account balance: ${error.response?.data?.msg || error.message}`);
     }
+}
 
     
 
