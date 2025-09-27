@@ -1,158 +1,111 @@
-# AsterDex BNB Trading Bot
+# 📜 Description
 
-A Telegram bot that replicates Asterbot functionality for BNB trading on AsterDex platform.
+This project is a Telegram bot that allows multiple users to trade crypto perpetual futures on the Aster Finance exchange. Each user who starts the bot is automatically provisioned with their own unique BEP-20 wallet and a dedicated set of Aster API keys, ensuring a secure and isolated trading environment for everyone.
 
-## Features
+The bot manages user sessions in-memory and provides an interactive, menu-based flow for opening long and short positions with dynamic, asset-specific leverage.
 
-- **Complete Asterbot Interface**: All commands from the original Asterbot
-- **BNB Trading**: Trade BNB pairs on AsterDex through Telegram
-- **Interactive Trading**: Step-by-step position opening with buttons
-- **Real-time Data**: Live prices, balances, and position tracking
-- **Secure**: Private key management and API authentication
+## ✨ Features
 
-## Commands
+- **Automatic User Onboarding**: New users get a unique BEP-20 wallet and Aster API keys just by sending `/start`.
+- **Multi-User Architecture**: Every user's data (wallet, keys, trading state) is handled separately and securely.
+- **Interactive Trading**: A clean, button-based flow for selecting assets, setting trade size, and choosing leverage.
+- **Dynamic Leverage**: The bot automatically fetches and displays only the valid leverage options for each specific asset, preventing errors.
+- **Core Trading Functions**: Check balances, view open positions, and initiate trades.
+- **Self-Custody**: Users can export their wallet's private key after acknowledging security warnings.
 
-### Getting Started
-- `/start` - Initialize your account and generate wallet addresses
-- `/help` - Show all available commands
+## 📋 Prerequisites
 
-### Wallet & Balance
-- `/balance` - Check BNB and trading account balances
-- `/deposit [amount|all]` - Deposit BNB to trading account
-- `/export` - Export wallet keys (redirects to web interface)
+Before you begin, ensure you have the following installed:
 
-### Trading
-- `/long` - Open long position (interactive flow)
-- `/short` - Open short position (interactive flow)
-- `/close` - Close existing positions
-- `/positions [symbol]` - View your trading positions
+- Node.js (v18.x or later)
+- npm (comes with Node.js)
 
-### Market Information
-- `/price [symbol]` - Get current market prices
-- `/markets` - List all available BNB pairs
+## ⚙️ Setup & Installation
 
-## Setup
+1. **Clone the Repository**
 
-### Prerequisites
-- Node.js 18+
-- Telegram Bot Token (from @BotFather)
-- AsterDex API credentials
-- BNB wallet private key
+   ```bash
+   git clone <your-repository-url>
+   cd asterdexbot
+   ```
 
-### Installation
+2. **Install Dependencies**
 
-1. **Clone and install dependencies:**
+   This project relies on `telegraf`, `ethers`, `axios`, and `dotenv`. Install them via npm:
+
    ```bash
    npm install
    ```
 
-2. **Create environment file:**
-   Create a `.env` file in the project root:
-   ```env
-   # Telegram Bot Configuration
-   TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
-   
-   # AsterDex API Configuration
-   ASTER_API_KEY=your_asterdex_api_key_here
-   ASTER_API_SECRET=your_asterdex_api_secret_here
-   
-   # BNB Wallet Configuration
-   BNB_PRIVATE_KEY=your_bnb_private_key_here
-   BNB_RPC_URL=https://bsc-dataseed.binance.org
-   
-   # Optional: BSCScan API for transaction history
-   BSCSCAN_API_KEY=your_bscscan_api_key_here
+3. **Create the Configuration File**
+
+   The bot uses a `.env` file for its Telegram token. Create this file in the project's root directory:
+
+   ```bash
+   touch .env
    ```
 
-3. **Get API credentials:**
-   - **Telegram Bot**: Message @BotFather on Telegram
-   - **AsterDex API**: Get from AsterDex platform settings
-   - **BNB Private Key**: Export from MetaMask, Trust Wallet, or generate new
-   - **BSCScan API**: Get free API key from bscscan.com (optional)
+## 🔑 Configuration
 
-4. **Run the bot:**
+The multi-user architecture simplifies configuration significantly. The only secret you need is your Telegram Bot Token.
+
+- **Get a Telegram Bot Token**:
+  - Open Telegram and search for the user `@BotFather`.
+  - Send the `/newbot` command and follow the prompts.
+  - BotFather will give you a unique token.
+
+- **Add the Token to your `.env` file**:
+
+   ```plaintext
+   # Telegram Bot Configuration
+   TELEGRAM_BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN_HERE
+   ```
+
+**Note**: You do not need to provide `ASTER_API_KEY` or `BNB_PRIVATE_KEY` in the `.env` file. The bot securely generates these for each individual user when they start a conversation.
+
+## 🚀 Running the Bot
+
+- **For Development** (with automatic restart on file changes):
+
+   ```bash
+   npm run dev
+   ```
+
+- **For Production**:
+
    ```bash
    npm start
    ```
 
-## Usage Examples
+Once started, find your bot on Telegram and send the `/start` command to begin.
 
-### Basic Trading Flow
-1. Start the bot: `/start`
-2. Check balance: `/balance`
-3. Deposit funds: `/deposit 0.1`
-4. View markets: `/markets`
-5. Open position: `/long` (interactive flow)
-6. Check positions: `/positions`
-7. Close position: `/close`
+## 🤖 Available Commands
 
-### Interactive Trading
-- Use `/long` or `/short` to start interactive trading
-- Select asset from buttons
-- Enter position size
-- Choose leverage (2x, 5x, 10x, 20x, 50x, 100x)
-- Confirm trade
+- `/start` - Initializes your session, creating a unique wallet and API keys.
+- `/help` - Shows the list of available commands.
+- `/balance` - Checks your futures account balance.
+- `/positions` - Views your open trading positions.
+- `/long` - Starts the interactive flow to open a long position.
+- `/short` - Starts the interactive flow to open a short position.
+- `/cancel` - Cancels your current action (e.g., an unfinished trade).
+- `/export` - Starts the secure flow to export your wallet's private key.
 
-## Security Notes
+## ⚠️ IMPORTANT: Security & Production Use ⚠️
 
-⚠️ **Important Security Considerations:**
+This bot is designed to create and manage private keys for users. The current implementation stores these keys unencrypted in an in-memory `Map` (`userSessions` in `src/index.js`).
 
-- **Use a dedicated wallet** for the bot with limited funds
-- **Never share your private keys** or API credentials
-- **Keep your `.env` file secure** and never commit it to version control
-- **Test with small amounts** first
-- **Monitor your positions** regularly
+**This is NOT secure for a production environment.**
 
-## API Integration
+- **Data Loss**: If the bot restarts, all user wallets and API keys will be lost.
+- **Security Risk**: Storing unencrypted private keys in memory is a significant security risk.
 
-The bot integrates with:
-- **AsterDex API**: For trading operations and market data
-- **BSC Network**: For BNB wallet operations
-- **BSCScan API**: For transaction history (optional)
+For a real-world application, you **MUST** replace the `userSessions` `Map` with a secure, persistent database (like PostgreSQL with encryption, or a secrets manager like HashiCorp Vault).
 
-## Development
+## 🏗️ Project Structure
 
-### Project Structure
 ```
 src/
-├── index.js          # Main bot logic and commands
-├── asterdex.js       # AsterDex API integration
-└── bnb-wallet.js     # BNB wallet operations
+├── index.js          # Main bot logic, command handlers, and session management
+├── asterdex.js       # All communication with the AsterDex API
+└── bnb-wallet.js     # Utilities for creating BEP-20 wallets and signing messages
 ```
-
-### Adding New Features
-- Commands: Add new command handlers in `src/index.js`
-- API methods: Extend `AsterAPI` class in `src/asterdex.js`
-- Wallet operations: Add methods to `BNBWallet` class in `src/bnb-wallet.js`
-
-## Troubleshooting
-
-### Common Issues
-
-1. **"Missing environment variables"**
-   - Check your `.env` file has all required variables
-
-2. **"API Error"**
-   - Verify your AsterDex API credentials
-   - Check if API endpoints are accessible
-
-3. **"Failed to send BNB"**
-   - Ensure sufficient BNB for gas fees
-   - Check BSC network connection
-
-4. **"No positions found"**
-   - Make sure you have open positions
-   - Check if symbol filter is correct
-
-### Getting Help
-- Check the logs for detailed error messages
-- Verify all API credentials are correct
-- Ensure sufficient BNB balance for gas fees
-
-## License
-
-MIT License - Feel free to modify and distribute.
-
-## Disclaimer
-
-This bot is for educational purposes. Trading cryptocurrencies involves risk. Use at your own risk and never invest more than you can afford to lose.
