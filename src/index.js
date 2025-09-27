@@ -204,7 +204,7 @@ bot.start(async (ctx) => {
   const userId = ctx.from.id;
   
   // Rate limiting: max 5 /start commands per minute
-  if (!checkRateLimit(userId, 'start', 5, 60000)) {
+  if (!(await checkRateLimit(userId, 'start', 5, 60000))) {
     return ctx.reply('⏳ **Rate Limit Exceeded**\nPlease wait a moment before trying again.');
   }
 
@@ -365,7 +365,7 @@ async function handleDepositRequest(ctx, amount) {
   const userId = ctx.from.id;
   
   // Rate limiting: max 3 deposits per minute
-  if (!checkRateLimit(userId, 'deposit', 3, 60000)) {
+  if (!(await checkRateLimit(userId, 'deposit', 3, 60000))) {
     return ctx.reply('⏳ **Rate Limit Exceeded**\nPlease wait a moment before making another deposit.');
   }
   
@@ -438,7 +438,7 @@ async function handleBalanceRequest(ctx) {
   const userId = ctx.from.id;
   
   // Rate limiting: max 10 balance checks per minute
-  if (!checkRateLimit(userId, 'balance', 10, 60000)) {
+  if (!(await checkRateLimit(userId, 'balance', 10, 60000))) {
     return ctx.reply('⏳ **Rate Limit Exceeded**\nPlease wait a moment before checking your balance again.');
   }
   
@@ -506,7 +506,7 @@ bot.command('transfer', async (ctx) => {
     const userId = ctx.from.id;
     
     // Rate limiting: max 5 transfers per minute
-    if (!checkRateLimit(userId, 'transfer', 5, 60000)) {
+    if (!(await checkRateLimit(userId, 'transfer', 5, 60000))) {
       return ctx.reply('⏳ **Rate Limit Exceeded**\nPlease wait a moment before making another transfer.');
     }
     
@@ -573,7 +573,7 @@ bot.command('markets', async (ctx) => {
   const userId = ctx.from.id;
   
   // Rate limiting: max 15 market requests per minute
-  if (!checkRateLimit(userId, 'markets', 15, 60000)) {
+  if (!(await checkRateLimit(userId, 'markets', 15, 60000))) {
     return ctx.reply('⏳ **Rate Limit Exceeded**\nPlease wait a moment before browsing markets again.');
   }
   
@@ -685,7 +685,7 @@ const startTradingFlow = async (ctx, tradeType) => {
   const userId = ctx.from.id;
   
   // Rate limiting: max 5 trading attempts per minute
-  if (!checkRateLimit(userId, 'trading', 5, 60000)) {
+  if (!(await checkRateLimit(userId, 'trading', 5, 60000))) {
     return ctx.reply('⏳ **Rate Limit Exceeded**\nPlease wait a moment before making another trade.');
   }
   
