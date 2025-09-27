@@ -63,12 +63,23 @@ setInterval(() => {
 
 // Helper function to get user session from database
 async function getUserSession(userId) {
-  return await loadUserSession(userId);
+  try {
+    const session = await loadUserSession(userId);
+    return session;
+  } catch (error) {
+    console.error(`💥 [DB ERROR] Failed to load session for user ${userId}:`, error);
+    throw error;
+  }
 }
 
 // Helper function to save user session to database
 async function saveUserSessionData(userId, sessionData) {
-  await saveUserSession(userId, sessionData);
+  try {
+    await saveUserSession(userId, sessionData);
+  } catch (error) {
+    console.error(`💥 [DB ERROR] Failed to save session for user ${userId}:`, error);
+    throw error;
+  }
 }
 
 // Encryption/Decryption functions for sensitive data
@@ -784,10 +795,12 @@ bot.command('close', async (ctx) => {
 
 // Handle callback queries for interactive flows
 bot.on('callback_query', async (ctx) => {
+  const startTime = Date.now();
   try {
   const data = ctx.callbackQuery.data;
   const userId = ctx.from.id;
   console.log(`🔍 Callback query received: ${data} from user ${userId}`);
+  
   let session = await getUserSession(userId);
 
   // Load session from DB if not in cache
@@ -1240,9 +1253,11 @@ Your position has been closed and funds are available in your account.
         await ctx.editMessageText('⏳ Processing your trade...');
         
         try {
+            console.log(`🎯 [TRADE] Executing ${flow.type} order: ${flow.asset}, size: ${flow.size}, leverage: ${flow.leverage}`);
             const result = await asterAPI.placeOrder(decrypt(session.apiKey), decrypt(session.apiSecret), {
             symbol: flow.asset, side: flow.type, size: flow.size, leverage: flow.leverage
         });
+            console.log(`✅ [TRADE] Order successful:`, result);
             
         session.tradingFlow = null; // End the flow
             await saveUserSessionData(userId, session);
@@ -1260,7 +1275,8 @@ Your position has been closed and funds are available in your account.
         } catch (tradeError) {
             session.tradingFlow = null;
             await saveUserSessionData(userId, session);
-            console.error('❌ Trade execution error:', tradeError);
+            console.error('💥 [API ERROR] Trade execution failed:', tradeError);
+            console.error('💥 [API ERROR] Trade details:', { asset: flow.asset, side: flow.type, size: flow.size, leverage: flow.leverage });
             
             let userMessage = '❌ **Trade Failed** ';
             if (tradeError.message.includes('insufficient') || tradeError.message.includes('balance')) {
@@ -1305,17 +1321,26 @@ Your position has been closed and funds are available in your account.
     await ctx.reply(userMessage);
   }
   } catch (error) {
-    console.error('❌ Callback query error:', error);
+    const processingTime = Date.now() - startTime;
+    console.error(`💥 [ERROR] Callback query error after ${processingTime}ms:`, error);
+    console.error(`💥 [ERROR] Error stack:`, error.stack);
+    console.error(`💥 [ERROR] Callback data: ${ctx.callbackQuery?.data}, User: ${ctx.from?.id}`);
+    
     try {
       await ctx.answerCbQuery('An error occurred. Please try again.', { show_alert: true });
     } catch (answerError) {
-      console.error('❌ Failed to answer callback query:', answerError);
+      console.error('💥 [ERROR] Failed to answer callback query:', answerError);
+      console.error('💥 [ERROR] Answer error stack:', answerError.stack);
     }
+  } finally {
+    const totalTime = Date.now() - startTime;
+    console.log(`⏱️ [TIMING] Callback processed in ${totalTime}ms`);
   }
 });
 
 bot.on('text', async (ctx) => {
-  
+  const startTime = Date.now();
+  try {
   // Skip if this is a command (starts with /)
   if (ctx.message.text.startsWith('/')) {
     return;
@@ -1450,6 +1475,21 @@ Your funds are now available in your futures account for trading.
           await ctx.reply(userMessage);
       }
   }
+  } catch (error) {
+    const processingTime = Date.now() - startTime;
+    console.error(`💥 [ERROR] Text handler error after ${processingTime}ms:`, error);
+    console.error(`💥 [ERROR] Error stack:`, error.stack);
+    console.error(`💥 [ERROR] Text: ${ctx.message?.text}, User: ${ctx.from?.id}`);
+    
+    try {
+      await ctx.reply('❌ An error occurred while processing your message. Please try again.');
+    } catch (replyError) {
+      console.error('💥 [ERROR] Failed to send error reply:', replyError);
+    }
+  } finally {
+    const totalTime = Date.now() - startTime;
+    console.log(`⏱️ [TIMING] Text message processed in ${totalTime}ms`);
+  }
 });
 
 try {
@@ -1474,6 +1514,27 @@ try {
 }
 
 console.log('🚀 Starting bot launch...');
+
+// Add comprehensive error handling for uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('💥 [CRASH] Uncaught Exception:', error);
+  console.error('💥 [CRASH] Stack trace:', error.stack);
+  console.error('💥 [CRASH] Process will exit in 5 seconds...');
+  setTimeout(() => process.exit(1), 5000);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('💥 [CRASH] Unhandled Rejection at:', promise);
+  console.error('💥 [CRASH] Reason:', reason);
+  console.error('💥 [CRASH] Stack trace:', reason?.stack);
+});
+
+// Memory monitoring
+setInterval(() => {
+  const memUsage = process.memoryUsage();
+  console.log(`📊 [MEMORY] RSS: ${Math.round(memUsage.rss / 1024 / 1024)}MB, Heap: ${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`);
+}, 30000); // Every 30 seconds
+
 startKeepAliveServer();
 bot.launch().then(() => {
   
@@ -1481,16 +1542,34 @@ bot.launch().then(() => {
   console.log('✅ Bot is ready to receive commands');
   
 }).catch((error) => {
-  console.error('❌ [DEBUG] Bot launch failed:', error);
-  console.error('❌ [DEBUG] Launch error stack:', error.stack);
+  console.error('❌ [CRASH] Bot launch failed:', error);
+  console.error('❌ [CRASH] Launch error stack:', error.stack);
+  console.error('❌ [CRASH] Process exiting...');
+  process.exit(1);
 });
 
 console.log('🛡️ Setting up signal handlers...');
 process.once('SIGINT', () => {
-  console.log('🛑 SIGINT received, stopping bot...');
+  console.log('🛑 [SIGNAL] SIGINT received, stopping bot gracefully...');
+  console.log('🛑 [SIGNAL] Current memory usage:', process.memoryUsage());
   bot.stop('SIGINT');
 });
 process.once('SIGTERM', () => {
-  console.log('🛑 SIGTERM received, stopping bot...');
+  console.log('🛑 [SIGNAL] SIGTERM received, stopping bot gracefully...');
+  console.log('🛑 [SIGNAL] Current memory usage:', process.memoryUsage());
   bot.stop('SIGTERM');
+});
+process.once('SIGUSR1', () => {
+  console.log('🛑 [SIGNAL] SIGUSR1 received (likely Render restart)...');
+  console.log('🛑 [SIGNAL] Current memory usage:', process.memoryUsage());
+  bot.stop('SIGUSR1');
+});
+process.once('SIGUSR2', () => {
+  console.log('🛑 [SIGNAL] SIGUSR2 received (likely Render restart)...');
+  console.log('🛑 [SIGNAL] Current memory usage:', process.memoryUsage());
+  bot.stop('SIGUSR2');
+});
+process.on('exit', (code) => {
+  console.log(`🛑 [EXIT] Process exiting with code: ${code}`);
+  console.log('🛑 [EXIT] Final memory usage:', process.memoryUsage());
 });
