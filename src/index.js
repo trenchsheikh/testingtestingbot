@@ -86,7 +86,7 @@ async function saveUserSessionData(userId, sessionData) {
 function encrypt(text) {
   const iv = crypto.randomBytes(16);
   // Ensure the key is 32 bytes for aes-256-cbc by hashing it
-  const key = crypto.createHash('sha256').update(String(ENCRYPTION_KEY)).digest('base64').substr(0, 32);
+  const key = crypto.createHash('sha256').update(String(ENCRYPTION_KEY)).digest();
   const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
   let encrypted = cipher.update(text, 'utf8', 'hex');
   encrypted += cipher.final('hex');
@@ -103,7 +103,7 @@ function decrypt(encryptedText) {
   const iv = Buffer.from(textParts.shift(), 'hex');
   const encryptedData = Buffer.from(textParts.join(':'), 'hex');
   // Ensure the key is 32 bytes for aes-256-cbc by hashing it
-  const key = crypto.createHash('sha256').update(String(ENCRYPTION_KEY)).digest('base64').substr(0, 32);
+  const key = crypto.createHash('sha256').update(String(ENCRYPTION_KEY)).digest();
   const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
   let decrypted = decipher.update(encryptedData, 'hex', 'utf8');
   decrypted += decipher.final('utf8');
