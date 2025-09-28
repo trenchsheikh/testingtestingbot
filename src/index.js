@@ -179,8 +179,7 @@ bot.start(async (ctx) => {
   let session = await loadUserSession(userId);
 
   if (session) {
-    // If user exists, welcome them back
-    await ctx.reply(`🎉 Welcome back! Your wallet is: \`${session.walletAddress}\``, { parse_mode: 'Markdown' });
+    // If user exists, show the main menu directly
     return showMainMenu(ctx);
   }
 
