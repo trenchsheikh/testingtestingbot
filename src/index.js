@@ -134,6 +134,8 @@ const TRANSLATIONS = {
     btn_close: '❌ Close Position',
     btn_export: '🔑 Export Key',
     btn_language: '🌐 Language',
+    back_to_menu: '🔙 Back to Menu',
+    back_to_markets: '🔙 Back to Markets',
     help: '📋 Available Commands:\n/start - Start the bot & create your wallet\n/menu - Show the main menu with buttons\n/balance - Check all your balances (Wallet, Spot, Futures)\n/deposit [amount] - Deposit USDT from wallet to Futures\n/transfer [amount] [asset] - Transfer from Spot to Futures\n/export - Export your wallet\'s private key\n/long & /short - Start opening a trade\n/positions - View your open positions\n/close - Select a position to close\n/cancel - Cancel your current action\n/language - Set your language (English/中文)',
     deposit_enter_amount: '💸 Deposit Funds\n\nEnter the amount of USDT you want to deposit:\n\nExample: `50`',
     transfer_enter_amount: '🔄 Transfer Funds\n\nEnter the amount of USDT to transfer from Spot to Futures:\n\nExample: `25`',
@@ -163,6 +165,8 @@ const TRANSLATIONS = {
     btn_close: '❌ 平仓',
     btn_export: '🔑 导出私钥',
     btn_language: '🌐 语言',
+    back_to_menu: '🔙 返回菜单',
+    back_to_markets: '🔙 返回市场',
     help: '📋 可用命令：\n/start - 启动机器人并创建钱包\n/menu - 显示主菜单\n/balance - 查询全部余额\n/deposit [金额] - 从钱包充值 USDT 到合约\n/transfer [金额] [资产] - 从现货划转到合约\n/export - 导出钱包私钥\n/long & /short - 开始开仓\n/positions - 查看持仓\n/close - 选择持仓平仓\n/cancel - 取消当前操作\n/language - 设置语言（English/中文）',
     deposit_enter_amount: '💸 充值\n\n请输入要充值的 USDT 数量：\n\n示例：`50`',
     transfer_enter_amount: '🔄 划转\n\n请输入要从现货划转到合约的 USDT 数量：\n\n示例：`25`',
@@ -1176,15 +1180,15 @@ Do you understand the risks and wish to proceed?
 Choose an action for this market:
       `;
       
-      const keyboard = Markup.inlineKeyboard([
-        [
-          Markup.button.callback('📈 Long Position', `quick_long_${symbol}`),
-          Markup.button.callback('📉 Short Position', `quick_short_${symbol}`)
-        ],
-        [
-          Markup.button.callback('🔙 Back to Markets', 'menu_markets')
-        ]
-      ]);
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback(await t(ctx, 'btn_long'), `quick_long_${symbol}`),
+        Markup.button.callback(await t(ctx, 'btn_short'), `quick_short_${symbol}`)
+      ],
+      [
+        Markup.button.callback(await t(ctx, 'back_to_markets'), 'menu_markets')
+      ]
+    ]);
       
       return ctx.editMessageText(marketDetails, { parse_mode: 'Markdown', ...keyboard });
     } catch (error) {
