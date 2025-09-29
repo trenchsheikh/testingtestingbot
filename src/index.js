@@ -188,7 +188,7 @@ const TRANSLATIONS = {
     export_key_text: '🔑 **Your Private Key:**\n\n\`${key}\`\n\n⚠️ **Keep this safe and never share it with anyone!**',
     export_cancelled: '❌ Private key export cancelled.',
     btn_export_yes: '✅ Yes, export my key',
-    btn_export_no: '❌ Cancel'
+    btn_export_no: '❌ Cancel',
     cancel_done: '✅ Action cancelled. You are no longer in a trading flow.',
     price_unable_fetch: '❌ Unable to fetch price. Please make sure you use a valid trading pair like BTCUSDT.',
     require_start_cb: 'Please use /start to initialize your bot.',
@@ -200,7 +200,13 @@ const TRANSLATIONS = {
     processing_trade: '⏳ Processing your trade...',
     trade_cancelled: '❌ Trade cancelled.',
     error_generic: 'An error occurred.',
-    error_processing_text: '❌ An error occurred while processing your message. Please try again.'
+    error_processing_text: '❌ An error occurred while processing your message. Please try again.',
+    market_details_block: '📊 ${symbol} Market Details\n\n💰 **Current Price:** $${price}\n📈 **24h Change:** ${change}%\n📊 **24h High:** $${high}\n📉 **24h Low:** $${low}\n📊 **24h Volume:** $${volume}\n\nChoose an action for this market:',
+    export_warning: '⚠️ **SECURITY WARNING** ⚠️\n\nYou are about to view your wallet\'s private key.\n\n- **NEVER** share this key with anyone.\n- Anyone with this key has **FULL and IRREVERSIBLE CONTROL** over all funds in this wallet.\n- We strongly recommend you import this key into a secure, self-custodial wallet (like MetaMask or Trust Wallet) immediately.\n\nDo you understand the risks and wish to proceed?',
+    export_key_text: '🔑 **Your Private Key:**\n\n\`${key}\`\n\n⚠️ **Keep this safe and never share it with anyone!**',
+    export_cancelled: '❌ Private key export cancelled.',
+    btn_export_yes: '✅ Yes, export my key',
+    btn_export_no: '❌ Cancel'
   },
   zh: {
     rate_limit: '⏳ 频率限制已超出\n请稍后再试。',
