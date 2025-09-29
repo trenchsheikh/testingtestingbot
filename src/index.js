@@ -336,6 +336,9 @@ bot.command('menu', async (ctx) => {
     [
       Markup.button.callback(await t(ctx, 'btn_markets'), 'menu_markets'),
       Markup.button.callback(await t(ctx, 'btn_close'), 'menu_close')
+    ],
+    [
+      Markup.button.callback(await t(ctx, 'btn_language'), 'menu_language')
     ]
   ]);
 
