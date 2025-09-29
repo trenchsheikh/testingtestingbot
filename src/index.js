@@ -424,20 +424,20 @@ async function handleDepositRequest(ctx, amount) {
   const ASTER_TREASURY_ADDRESS = '0x128463A60784c4D3f46c23Af3f65Ed859Ba87974';
 
   if (isNaN(amount) || amount <= 0) {
-    return ctx.reply('Please provide a valid amount in USDT.\nUsage: `/deposit 50`', { parse_mode: 'Markdown' });
+    return ctx.reply(await t(ctx, 'deposit_invalid_amount'), { parse_mode: 'Markdown' });
   }
 
   try {
     // Check for sufficient USDT balance first (more important for user)
     const usdtBalance = await BNBWallet.getUsdtBalance(session.walletAddress);
     if (parseFloat(usdtBalance) < amount) {
-      return ctx.reply(`⚠️ **Insufficient USDT Balance!**\nYour wallet has ${usdtBalance} USDT, but you're trying to deposit ${amount} USDT.\n\nPlease send USDT to your wallet address first:\n\`${session.walletAddress}\``, { parse_mode: 'Markdown' });
+      return ctx.reply(await t(ctx, 'deposit_insufficient_usdt', { balance: usdtBalance, amount, wallet: session.walletAddress }), { parse_mode: 'Markdown' });
     }
     
     // Check for sufficient BNB for gas fees
     const bnbBalance = await BNBWallet.getWalletBalance(session.walletAddress);
     if (parseFloat(bnbBalance) < 0.001) {
-      return ctx.reply('⚠️ **Low Gas Balance!**\nYou need at least ~0.001 BNB in your wallet to pay for transaction fees.\n\nPlease send some BNB to your wallet address for gas fees.', { parse_mode: 'Markdown' });
+      return ctx.reply(await t(ctx, 'deposit_low_gas'), { parse_mode: 'Markdown' });
     }
 
     await ctx.reply(`Depositing ${amount} USDT directly to the Aster exchange. Please wait for the on-chain transaction to confirm...`);
@@ -446,13 +446,13 @@ async function handleDepositRequest(ctx, amount) {
     const decryptedPrivateKey = decrypt(session.privateKey);
     const tx = await BNBWallet.sendUsdt(decryptedPrivateKey, ASTER_TREASURY_ADDRESS, amount);
     
-    await ctx.reply(`✅ **Deposit Transaction Sent!**\nYour funds should appear in your **Futures Account** in a few minutes.\n\n**Transaction Hash:** \`${tx.hash}\``, { parse_mode: 'Markdown' });
+    await ctx.reply(await t(ctx, 'deposit_tx_sent', { hash: tx.hash }), { parse_mode: 'Markdown' });
 
   } catch (error) {
     console.error('❌ [DEBUG] Error in /deposit command:', error);
     const errorMessage = error.code === 'INSUFFICIENT_FUNDS' ? 'Insufficient BNB for gas fees.' : error.message;
     // User-friendly error messages
-    let userMessage = '❌ **Deposit Failed** ';
+    let userMessage = await t(ctx, 'deposit_failed_prefix');
     if (error.code === 'INSUFFICIENT_FUNDS') {
       userMessage += '❌ **Insufficient BNB for Gas Fees**\nYou need at least 0.001 BNB in your wallet to pay for transaction fees.\n\n**To fix this:**\nSend some BNB to your wallet address for gas fees.';
     } else if (error.message.includes('insufficient') && error.message.includes('USDT')) {
@@ -491,10 +491,10 @@ async function handleBalanceRequest(ctx) {
   const session = await getUserSession(userId);
   
   if (!session?.isInitialized) {
-    return ctx.reply('Please use /start first to set up your account.');
+    return ctx.reply(await t(ctx, 'require_start'));
   }
 
-  await ctx.reply('Hold on, fetching all your balances...');
+  await ctx.reply(await t(ctx, 'balance_fetching'));
 
   try {
     const [onChainBnb, onChainUsdt, spotBalances, futuresBalance] = await Promise.all([
@@ -504,35 +504,23 @@ async function handleBalanceRequest(ctx) {
       asterAPI.getAccountBalance(decrypt(session.apiKey), decrypt(session.apiSecret))
     ]);
 
-    let balanceMessage = `
-💰 Your Complete Balances:
-**Address:** \`${session.walletAddress}\`
------------------------------------
-`;
-    balanceMessage += `**On-Chain Wallet:**\n`;
-    balanceMessage += `  - \`${onChainBnb} BNB\`\n`;
-    balanceMessage += `  - \`${onChainUsdt} USDT\`\n`;
-    balanceMessage += `**Spot Account:**\n`;
+    let balanceMessage = await t(ctx, 'balance_header', { wallet: session.walletAddress, bnb: onChainBnb, usdt: onChainUsdt });
 
     if (Object.keys(spotBalances).length > 0) {
       for (const asset in spotBalances) {
         balanceMessage += `  - \`${spotBalances[asset].toFixed(4)} ${asset}\`\n`;
       }
     } else {
-      // --- MODIFIED LINE ---
-      balanceMessage += `  - \`0.00 USDT\`\n`;
+      balanceMessage += await t(ctx, 'balance_spot_empty');
     }
-    balanceMessage += `-----------------------------------\n`;
-    balanceMessage += `**Futures Account:**\n`;
-    balanceMessage += `  - **Available:** \`${futuresBalance.available} USDT\`\n`;
-    balanceMessage += `  - **Total Margin:** \`${futuresBalance.total} USDT\`\n`;
+    balanceMessage += await t(ctx, 'balance_futures', { available: futuresBalance.available, total: futuresBalance.total });
 
     await ctx.reply(balanceMessage, { parse_mode: 'Markdown' });
 
   } catch (error) {
     console.error('❌ [DEBUG] Error in combined /balance command:', error);
     console.error('❌ [DEBUG] Error fetching balances:', error);
-    await ctx.reply('❌ Unable to fetch your balances. Please try again in a moment.');
+    await ctx.reply(await t(ctx, 'balance_unable_fetch'));
   }
 }
 
@@ -561,7 +549,7 @@ bot.command('transfer', async (ctx) => {
     const asset = args[2] || 'USDT';
     
     if (!amount) {
-      return ctx.reply('Usage: /transfer [amount] [asset]\nExample: /transfer 25 USDT');
+      return ctx.reply(await t(ctx, 'transfer_usage'));
     }
     const session = await getUserSession(userId);
 
@@ -574,32 +562,31 @@ bot.command('transfer', async (ctx) => {
     }
     
     if (!session?.isInitialized) {
-      return ctx.reply('Please use /start first to initialize your account.');
+      return ctx.reply(await t(ctx, 'require_start'));
     }
 
     const transferAmount = parseFloat(amount);
     if (isNaN(transferAmount) || transferAmount <= 0) {
-      return ctx.reply('Invalid amount. Please enter a valid number.');
+      return ctx.reply(await t(ctx, 'invalid_amount_number'));
     }
 
     // Transfer from spot to futures using v3 API
     const result = await asterAPI.transferSpotToFutures(decrypt(session.apiKey), decrypt(session.apiSecret), asset, transferAmount);
     
     const transferMessage = `
-✅ **Transfer Successful!**
+${await t(ctx, 'transfer_success_header')}
 
 **Asset:** ${asset}
 **Amount:** ${transferAmount}
 **Transaction ID:** ${result.transactionId}
 **Status:** ${result.status}
 
-Your funds are now available in your futures account for trading.
-    `;
+`;
 
     await ctx.reply(transferMessage, { parse_mode: 'Markdown' });
   } catch (error) {
       console.error('❌ [DEBUG] Transfer command error:', error);
-      let userMessage = '❌ Transfer failed. ';
+      let userMessage = await t(ctx, 'transfer_failed_prefix');
       if (error.message.includes('insufficient') || error.message.includes('balance')) {
         userMessage += 'Insufficient balance in your spot account. Please deposit more funds to your spot account first.';
       } else if (error.message.includes('not supported') || error.message.includes('symbol')) {
@@ -913,13 +900,13 @@ bot.on('callback_query', async (ctx) => {
     // Call positions command handler directly
     try {
       if (!session?.isInitialized) {
-        return ctx.reply('Please use /start first to set up your account.');
+        return ctx.reply(await t(ctx, 'require_start'));
       }
       
       const positions = await asterAPI.getPositions(decrypt(session.apiKey), decrypt(session.apiSecret));
       
       if (positions.length === 0) {
-        return ctx.reply('No open positions found.');
+        return ctx.reply(await t(ctx, 'positions_none'));
       }
       
       let positionsList = '📊 Your Positions:\n\n';
@@ -937,7 +924,7 @@ bot.on('callback_query', async (ctx) => {
       return ctx.reply(positionsList, { parse_mode: 'Markdown' });
     } catch (error) {
       console.error('❌ [DEBUG] Error fetching positions:', error);
-      return ctx.reply('❌ Unable to fetch your positions. Please try again in a moment.');
+      return ctx.reply(await t(ctx, 'positions_unable_fetch'));
     }
   }
   if (data === 'menu_long') {
