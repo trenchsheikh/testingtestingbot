@@ -770,9 +770,9 @@ bot.command('markets', async (ctx) => {
     }
     
     // Add back button
-    keyboard.push([Markup.button.callback('🔙 Back to Menu', 'back_to_menu')]);
+    keyboard.push([Markup.button.callback(await t(ctx, 'back_to_menu'), 'back_to_menu')]);
     
-    const message = `📈 Available Markets (${markets.length} pairs)\n\nSelect a market to view details:\n\nShowing: ${startIndex + 1}-${endIndex} of ${markets.length}`;
+    const message = await t(ctx, 'markets_title', { count: markets.length, from: startIndex + 1, to: endIndex });
     
     await ctx.reply(message, Markup.inlineKeyboard(keyboard));
   } catch (error) {
@@ -1107,9 +1107,9 @@ bot.on('callback_query', async (ctx) => {
       }
       
       // Add back button
-      keyboard.push([Markup.button.callback('🔙 Back to Menu', 'back_to_menu')]);
+      keyboard.push([Markup.button.callback(await t(ctx, 'back_to_menu'), 'back_to_menu')]);
       
-      const message = `📈 Available Markets (${markets.length} pairs)\n\nSelect a market to view details:\n\nShowing: ${startIndex + 1}-${endIndex} of ${markets.length}`;
+      const message = await t(ctx, 'markets_title', { count: markets.length, from: startIndex + 1, to: endIndex });
       
       return ctx.reply(message, Markup.inlineKeyboard(keyboard));
     } catch (error) {
@@ -1464,17 +1464,29 @@ Your position has been closed and funds are available in your account.
             
             let userMessage = await t(ctx, 'trade_failed_prefix');
             if (tradeError.message.includes('insufficient') || tradeError.message.includes('balance')) {
-              userMessage += '❌ **Empty Futures Account!**\nYou have no USDT in your futures account to trade with.\n\n**To fix this:**\n1. Use `/deposit` to add USDT to your futures account\n2. Or transfer from spot using the Transfer button';
+              userMessage += (await getUserLanguage(userId)) === 'zh'
+                ? '❌ **合约账户余额为空！**\n您的合约账户中没有 USDT 可用于交易。\n\n**解决方法：**\n1. 使用 `/deposit` 向合约账户充值\n2. 或使用“划转”按钮从现货划转'
+                : '❌ **Empty Futures Account!**\nYou have no USDT in your futures account to trade with.\n\n**To fix this:**\n1. Use `/deposit` to add USDT to your futures account\n2. Or transfer from spot using the Transfer button';
             } else if (tradeError.message.includes('not supported symbol') || tradeError.message.includes('symbol')) {
-              userMessage += '❌ **Trading Pair Not Supported**\nThis asset is not available for trading. Please try a different symbol.';
+              userMessage += (await getUserLanguage(userId)) === 'zh'
+                ? '❌ **交易对不支持**\n该资产不可交易，请尝试其他交易对。'
+                : '❌ **Trading Pair Not Supported**\nThis asset is not available for trading. Please try a different symbol.';
             } else if (tradeError.message.includes('leverage')) {
-              userMessage += '❌ **Invalid Leverage**\nThe leverage amount is too high for this trading pair. Please try a lower leverage (1x-10x).';
+              userMessage += (await getUserLanguage(userId)) === 'zh'
+                ? '❌ **杠杆无效**\n该交易对的杠杆过高，请尝试更低杠杆（1x-10x）。'
+                : '❌ **Invalid Leverage**\nThe leverage amount is too high for this trading pair. Please try a lower leverage (1x-10x).';
             } else if (tradeError.message.includes('quantity') || tradeError.message.includes('size')) {
-              userMessage += '❌ **Position Size Too Large**\nYour position size exceeds your available balance or trading limits.\n\n**Try:**\n• Smaller position size\n• Check your futures balance with `/balance`';
+              userMessage += (await getUserLanguage(userId)) === 'zh'
+                ? '❌ **仓位大小过大**\n您的仓位大小超过可用余额或交易限制。\n\n**建议：**\n• 减小仓位大小\n• 使用 `/balance` 查看合约余额'
+                : '❌ **Position Size Too Large**\nYour position size exceeds your available balance or trading limits.\n\n**Try:**\n• Smaller position size\n• Check your futures balance with `/balance`';
             } else if (tradeError.message.includes('network') || tradeError.message.includes('timeout')) {
-              userMessage += '❌ **Network Issue**\nConnection problem with the trading server. Please try again in a few moments.';
+              userMessage += (await getUserLanguage(userId)) === 'zh'
+                ? '❌ **网络问题**\n交易服务器连接异常，请稍后重试。'
+                : '❌ **Network Issue**\nConnection problem with the trading server. Please try again in a few moments.';
             } else {
-              userMessage += '❌ **Trading Error**\nSomething went wrong. Please check your balance and try again.';
+              userMessage += (await getUserLanguage(userId)) === 'zh'
+                ? '❌ **交易错误**\n发生异常，请检查余额后重试。'
+                : '❌ **Trading Error**\nSomething went wrong. Please check your balance and try again.';
             }
             await ctx.editMessageText(userMessage, { parse_mode: 'Markdown' });
         }
@@ -1620,7 +1632,7 @@ Your funds are now available in your futures account for trading.
           await saveUserSessionData(userId, session);
 
           const symbol = session.tradingFlow.asset;
-          await ctx.reply(`Fetching leverage options for ${symbol}...`);
+          await ctx.reply(await t(ctx, 'fetching_leverage', { symbol }));
 
           // 1. Get the asset-specific max leverage
           const maxLeverage = await asterAPI.getLeverageBrackets(decrypt(session.apiKey), decrypt(session.apiSecret), symbol);
