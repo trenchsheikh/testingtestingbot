@@ -139,7 +139,10 @@ const TRANSLATIONS = {
     transfer_enter_amount: '🔄 Transfer Funds\n\nEnter the amount of USDT to transfer from Spot to Futures:\n\nExample: `25`',
     language_prompt: '🌐 Select your language:',
     language_set_en: '✅ Language set to English.',
-    language_set_zh: '✅ 语言已切换为中文。'
+    language_set_zh: '✅ 语言已切换为中文。',
+    open_long_select: '📈 Open Long Position\n\nSelect the asset (${from}-${to} of ${count}):',
+    open_short_select: '📉 Open Short Position\n\nSelect the asset (${from}-${to} of ${count}):',
+    close_select_prompt: '🔒 Close Position\n\nSelect position to close:'
   },
   zh: {
     rate_limit: '⏳ 频率限制已超出\n请稍后再试。',
@@ -165,7 +168,10 @@ const TRANSLATIONS = {
     transfer_enter_amount: '🔄 划转\n\n请输入要从现货划转到合约的 USDT 数量：\n\n示例：`25`',
     language_prompt: '🌐 请选择语言：',
     language_set_en: '✅ 已切换为 English。',
-    language_set_zh: '✅ 语言已切换为中文。'
+    language_set_zh: '✅ 语言已切换为中文。',
+    open_long_select: '📈 开多\n\n选择交易对（${from}-${to} / 共 ${count}）：',
+    open_short_select: '📉 开空\n\n选择交易对（${from}-${to} / 共 ${count}）：',
+    close_select_prompt: '🔒 平仓\n\n请选择要平仓的持仓：'
   }
 };
 
@@ -772,11 +778,11 @@ const startTradingFlow = async (ctx, tradeType) => {
   }
   
   // Add back button
-  keyboard.push([Markup.button.callback('🔙 Back to Menu', 'back_to_menu')]);
+  keyboard.push([Markup.button.callback(await t(ctx, 'back_to_menu'), 'back_to_menu')]);
   
   const message = tradeType === 'long' 
-      ? `📈 Open Long Position\n\nSelect the asset (${startIndex + 1}-${endIndex} of ${markets.length}):` 
-      : `📉 Open Short Position\n\nSelect the asset (${startIndex + 1}-${endIndex} of ${markets.length}):`;
+      ? await t(ctx, 'open_long_select', { from: startIndex + 1, to: endIndex, count: markets.length }) 
+      : await t(ctx, 'open_short_select', { from: startIndex + 1, to: endIndex, count: markets.length });
   await ctx.reply(message, Markup.inlineKeyboard(keyboard));
 };
 
@@ -805,7 +811,7 @@ bot.command('positions', async (ctx) => {
     const positions = await asterAPI.getPositions(decrypt(session.apiKey), decrypt(session.apiSecret), symbol);
     
     if (positions.length === 0) {
-      return ctx.reply('No open positions found.');
+      return ctx.reply(await t(ctx, 'rate_limit'));
     }
     
     let positionsList = '📊 Your Positions:\n\n';
@@ -848,7 +854,7 @@ bot.command('close', async (ctx) => {
     const positions = await asterAPI.getPositions(decrypt(session.apiKey), decrypt(session.apiSecret));
     
     if (positions.length === 0) {
-      return ctx.reply('No open positions to close.');
+      return ctx.reply(await t(ctx, 'rate_limit'));
     }
     
     const keyboard = positions.map(pos => 
@@ -1033,7 +1039,7 @@ bot.on('callback_query', async (ctx) => {
       );
       
       return ctx.reply(
-        '🔒 Close Position\n\nSelect position to close:',
+        await t(ctx, 'close_select_prompt'),
         Markup.inlineKeyboard(keyboard)
       );
     } catch (error) {
@@ -1255,11 +1261,11 @@ Choose an action for this market:
         keyboard.push(navButtons);
       }
       
-      keyboard.push([Markup.button.callback('🔙 Back to Menu', 'back_to_menu')]);
+      keyboard.push([Markup.button.callback(await t(ctx, 'back_to_menu'), 'back_to_menu')]);
       
       const message = flow.type === 'long' 
-          ? `📈 Open Long Position\n\nSelect the asset (${startIndex + 1}-${endIndex} of ${markets.length}):` 
-          : `📉 Open Short Position\n\nSelect the asset (${startIndex + 1}-${endIndex} of ${markets.length}):`;
+          ? await t(ctx, 'open_long_select', { from: startIndex + 1, to: endIndex, count: markets.length }) 
+          : await t(ctx, 'open_short_select', { from: startIndex + 1, to: endIndex, count: markets.length });
       
       // Update the trading flow page
       flow.page = page;
@@ -1268,7 +1274,7 @@ Choose an action for this market:
       return ctx.editMessageText(message, Markup.inlineKeyboard(keyboard));
     } catch (error) {
       console.error('❌ [DEBUG] Error loading markets page:', error);
-      return ctx.editMessageText('❌ Error loading markets page. Please try again.');
+      return ctx.editMessageText(await t(ctx, 'rate_limit'));
     }
   }
   
