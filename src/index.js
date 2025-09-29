@@ -182,6 +182,24 @@ const TRANSLATIONS = {
     processing_trade: '⏳ Processing your trade...',
     trade_cancelled: '❌ Trade cancelled.',
     error_generic: 'An error occurred.',
+    error_processing_text: '❌ An error occurred while processing your message. Please try again.',
+    market_details_block: '📊 ${symbol} Market Details\n\n💰 **Current Price:** $${price}\n📈 **24h Change:** ${change}%\n📊 **24h High:** $${high}\n📉 **24h Low:** $${low}\n📊 **24h Volume:** $${volume}\n\nChoose an action for this market:',
+    export_warning: '⚠️ **SECURITY WARNING** ⚠️\n\nYou are about to view your wallet\'s private key.\n\n- **NEVER** share this key with anyone.\n- Anyone with this key has **FULL and IRREVERSIBLE CONTROL** over all funds in this wallet.\n- We strongly recommend you import this key into a secure, self-custodial wallet (like MetaMask or Trust Wallet) immediately.\n\nDo you understand the risks and wish to proceed?',
+    export_key_text: '🔑 **Your Private Key:**\n\n\`${key}\`\n\n⚠️ **Keep this safe and never share it with anyone!**',
+    export_cancelled: '❌ Private key export cancelled.',
+    btn_export_yes: '✅ Yes, export my key',
+    btn_export_no: '❌ Cancel'
+    cancel_done: '✅ Action cancelled. You are no longer in a trading flow.',
+    price_unable_fetch: '❌ Unable to fetch price. Please make sure you use a valid trading pair like BTCUSDT.',
+    require_start_cb: 'Please use /start to initialize your bot.',
+    expired_browse: 'Market browsing has expired. Please start again.',
+    already_on_page: 'You are already on this page.',
+    error_loading_markets_page: 'Error loading markets page',
+    markets_pagination_info: 'Market browsing pagination info',
+    market_selection_expired: 'Market selection has expired. Please start again.',
+    processing_trade: '⏳ Processing your trade...',
+    trade_cancelled: '❌ Trade cancelled.',
+    error_generic: 'An error occurred.',
     error_processing_text: '❌ An error occurred while processing your message. Please try again.'
   },
   zh: {
@@ -240,6 +258,24 @@ const TRANSLATIONS = {
     invalid_size_number: '无效大小。请输入正数。',
     fetching_leverage: '正在获取 ${symbol} 的杠杆选项…',
     leverage_prompt: '大小：${size} USDT\n${symbol} 的最大杠杆：**${max}x**\n\n请选择杠杆：',
+    cancel_done: '✅ 已取消操作。您不再处于交易流程中。',
+    price_unable_fetch: '❌ 无法获取价格，请确认交易对是否有效（如 BTCUSDT）。',
+    require_start_cb: '请先使用 /start 初始化机器人。',
+    expired_browse: '市场浏览已过期，请重新开始。',
+    already_on_page: '您已在此页。',
+    error_loading_markets_page: '加载市场页面出错',
+    markets_pagination_info: '市场分页信息',
+    market_selection_expired: '市场选择已过期，请重新开始。',
+    processing_trade: '⏳ 正在处理您的交易…',
+    trade_cancelled: '❌ 交易已取消。',
+    error_generic: '发生错误。',
+    error_processing_text: '❌ 处理您的消息时发生错误，请重试。',
+    market_details_block: '📊 ${symbol} 市场详情\n\n💰 **当前价格：** $${price}\n📈 **24小时涨跌：** ${change}%\n📊 **24小时最高：** $${high}\n📉 **24小时最低：** $${low}\n📊 **24小时成交量：** $${volume}\n\n请选择操作：',
+    export_warning: '⚠️ **安全警告** ⚠️\n\n您即将查看钱包的私钥。\n\n- **请勿**与任何人分享此私钥。\n- 拥有此私钥的人将对该钱包中的资金拥有**完全且不可逆的控制权**。\n- 强烈建议您立即将此私钥导入安全的去托管钱包（如 MetaMask 或 Trust Wallet）。\n\n您是否理解风险并继续？',
+    export_key_text: '🔑 **您的私钥：**\n\n\`${key}\`\n\n⚠️ **请务必妥善保管，切勿泄露！**',
+    export_cancelled: '❌ 私钥导出已取消。',
+    btn_export_yes: '✅ 是，导出我的私钥',
+    btn_export_no: '❌ 取消'
     cancel_done: '✅ 已取消操作。您不再处于交易流程中。',
     price_unable_fetch: '❌ 无法获取价格，请确认交易对是否有效（如 BTCUSDT）。',
     require_start_cb: '请先使用 /start 初始化机器人。',
@@ -453,22 +489,12 @@ bot.command('export', async (ctx) => {
     return ctx.reply(await t(ctx, 'require_start_wallet'));
   }
 
-  const warningMessage = `
-⚠️ **SECURITY WARNING** ⚠️
-
-You are about to view your wallet's private key.
-
-- **NEVER** share this key with anyone.
-- Anyone with this key has **FULL and IRREVERSIBLE CONTROL** over all funds in this wallet.
-- We strongly recommend you import this key into a secure, self-custodial wallet (like MetaMask or Trust Wallet) immediately.
-
-Do you understand the risks and wish to proceed?
-  `;
+  const warningMessage = await t(ctx, 'export_warning');
 
   // Create a confirmation keyboard
   const keyboard = Markup.inlineKeyboard([
-    Markup.button.callback('✅ Yes, export my key', 'export_confirm_yes'),
-    Markup.button.callback('❌ Cancel', 'export_confirm_no')
+    Markup.button.callback(await t(ctx, 'btn_export_yes'), 'export_confirm_yes'),
+    Markup.button.callback(await t(ctx, 'btn_export_no'), 'export_confirm_no')
   ]);
 
   await ctx.reply(warningMessage, { parse_mode: 'Markdown', ...keyboard });
@@ -1121,22 +1147,12 @@ bot.on('callback_query', async (ctx) => {
       return ctx.reply('Please use /start first to generate a wallet.');
     }
 
-    const warningMessage = `
-⚠️ **SECURITY WARNING** ⚠️
-
-You are about to view your wallet's private key.
-
-- **NEVER** share this key with anyone.
-- Anyone with this key has **FULL and IRREVERSIBLE CONTROL** over all funds in this wallet.
-- We strongly recommend you import this key into a secure, self-custodial wallet (like MetaMask or Trust Wallet) immediately.
-
-Do you understand the risks and wish to proceed?
-    `;
+    const warningMessage = await t(ctx, 'export_warning');
 
     // Create a confirmation keyboard
     const keyboard = Markup.inlineKeyboard([
-      Markup.button.callback('✅ Yes, export my key', 'export_confirm_yes'),
-      Markup.button.callback('❌ Cancel', 'export_confirm_no')
+      Markup.button.callback(await t(ctx, 'btn_export_yes'), 'export_confirm_yes'),
+      Markup.button.callback(await t(ctx, 'btn_export_no'), 'export_confirm_no')
     ]);
 
     return ctx.reply(warningMessage, { parse_mode: 'Markdown', ...keyboard });
@@ -1154,11 +1170,11 @@ Do you understand the risks and wish to proceed?
   if (data === 'export_confirm_yes') {
     await ctx.answerCbQuery();
     const decryptedKey = decrypt(session.privateKey);
-    return ctx.editMessageText(`🔑 **Your Private Key:**\n\n\`${decryptedKey}\`\n\n⚠️ **Keep this safe and never share it with anyone!**`, { parse_mode: 'Markdown' });
+    return ctx.editMessageText(await t(ctx, 'export_key_text', { key: decryptedKey }), { parse_mode: 'Markdown' });
   }
   if (data === 'export_confirm_no') {
     await ctx.answerCbQuery();
-    return ctx.editMessageText('❌ Private key export cancelled.');
+    return ctx.editMessageText(await t(ctx, 'export_cancelled'));
   }
 
   // --- Markets Browsing Handlers ---
