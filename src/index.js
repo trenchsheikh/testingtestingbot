@@ -206,7 +206,12 @@ const TRANSLATIONS = {
     export_key_text: '🔑 **Your Private Key:**\n\n\`${key}\`\n\n⚠️ **Keep this safe and never share it with anyone!**',
     export_cancelled: '❌ Private key export cancelled.',
     btn_export_yes: '✅ Yes, export my key',
-    btn_export_no: '❌ Cancel'
+    btn_export_no: '❌ Cancel',
+    trade_confirm_btn: '✅ Confirm Trade',
+    trade_cancel_btn: '❌ Cancel',
+    trade_executed_success: '✅ **Trade Executed Successfully!**',
+    trade_failed_prefix: '❌ **Trade Failed** ',
+    trade_confirmation_text: '📋 Trade Confirmation:\n\n**Asset:** ${asset}\n**Side:** ${side}\n**Size:** ${size} USDT\n**Leverage:** ${leverage}x'
   },
   zh: {
     rate_limit: '⏳ 频率限制已超出\n请稍后再试。',
@@ -281,7 +286,12 @@ const TRANSLATIONS = {
     export_key_text: '🔑 **您的私钥：**\n\n\`${key}\`\n\n⚠️ **请务必妥善保管，切勿泄露！**',
     export_cancelled: '❌ 私钥导出已取消。',
     btn_export_yes: '✅ 是，导出我的私钥',
-    btn_export_no: '❌ 取消'
+    btn_export_no: '❌ 取消',
+    trade_confirm_btn: '✅ 确认交易',
+    trade_cancel_btn: '❌ 取消',
+    trade_executed_success: '✅ **交易执行成功！**',
+    trade_failed_prefix: '❌ **交易失败** ',
+    trade_confirmation_text: '📋 交易确认：\n\n**资产：** ${asset}\n**方向：** ${side}\n**大小：** ${size} USDT\n**杠杆：** ${leverage}x'
   }
 };
 
@@ -941,7 +951,7 @@ bot.command('close', async (ctx) => {
     const positions = await asterAPI.getPositions(decrypt(session.apiKey), decrypt(session.apiSecret));
     
     if (positions.length === 0) {
-      return ctx.reply(await t(ctx, 'rate_limit'));
+      return ctx.reply(await t(ctx, 'close_none'));
     }
     
     const keyboard = positions.map(pos => 
@@ -1118,7 +1128,7 @@ bot.on('callback_query', async (ctx) => {
       const positions = await asterAPI.getPositions(decrypt(session.apiKey), decrypt(session.apiSecret));
       
       if (positions.length === 0) {
-        return ctx.reply('No open positions to close.');
+        return ctx.reply(await t(ctx, 'close_none'));
       }
       
       const keyboard = positions.map(pos => 
@@ -1131,7 +1141,7 @@ bot.on('callback_query', async (ctx) => {
       );
     } catch (error) {
       console.error('❌ [DEBUG] Error fetching positions for close:', error);
-      return ctx.reply('❌ Unable to fetch your positions. Please try again in a moment.');
+      return ctx.reply(await t(ctx, 'positions_unable_fetch'));
     }
   }
   if (data === 'menu_export') {
@@ -1293,7 +1303,7 @@ Choose an action for this market:
     session.tradingFlow = { type: tradeType, step: 'enter_size', asset: symbol };
     await saveUserSessionData(userId, session);
     
-    const message = `📈 **Open ${tradeType.toUpperCase()} Position**\n\nSelected: **${symbol}**\n\nEnter position size (in USDT):`;
+    const message = await t(ctx, 'enter_size_prompt', { symbol });
     
     return ctx.editMessageText(message, { parse_mode: 'Markdown' });
   }
@@ -1402,22 +1412,23 @@ Your position has been closed and funds are available in your account.
         flow.step = 'enter_size';
         await saveUserSessionData(userId, session);
         await ctx.answerCbQuery();
-        await ctx.editMessageText(`Selected: **${flow.asset}**\n\nEnter position size (in USDT):`, { parse_mode: 'Markdown' });
+        await ctx.editMessageText(await t(ctx, 'enter_size_prompt', { symbol: flow.asset }), { parse_mode: 'Markdown' });
     } else if (flow.step === 'enter_leverage' && data.startsWith('leverage_')) {
         flow.leverage = parseInt(data.replace('leverage_', ''));
         flow.step = 'confirm';
         await saveUserSessionData(userId, session);
         const confirmKeyboard = Markup.inlineKeyboard([
-            Markup.button.callback('✅ Confirm Trade', 'confirm_trade'),
-            Markup.button.callback('❌ Cancel', 'cancel_trade')
+            Markup.button.callback(await t(ctx, 'trade_confirm_btn'), 'confirm_trade'),
+            Markup.button.callback(await t(ctx, 'trade_cancel_btn'), 'cancel_trade')
         ]);
         await ctx.answerCbQuery();
         await ctx.editMessageText(
-            `📋 Trade Confirmation:\n\n` +
-            `**Asset:** ${flow.asset}\n` +
-            `**Side:** ${flow.type.toUpperCase()}\n` +
-            `**Size:** ${flow.size} USDT\n` +
-            `**Leverage:** ${flow.leverage}x`,
+            await t(ctx, 'trade_confirmation_text', { 
+                asset: flow.asset, 
+                side: flow.type.toUpperCase(), 
+                size: flow.size, 
+                leverage: flow.leverage 
+            }),
             { parse_mode: 'Markdown', ...confirmKeyboard }
         );
     } else if (flow.step === 'confirm' && data === 'confirm_trade') {
@@ -1436,7 +1447,7 @@ Your position has been closed and funds are available in your account.
             await saveUserSessionData(userId, session);
             
         await ctx.editMessageText(
-                `✅ **Trade Executed Successfully!**\n\n` +
+                `${await t(ctx, 'trade_executed_success')}\n\n` +
             `**Order ID:** \`${result.orderId}\`\n` +
             `**Symbol:** ${result.symbol}\n` +
                 `**Side:** ${result.side.toUpperCase()}\n` +
@@ -1451,7 +1462,7 @@ Your position has been closed and funds are available in your account.
             console.error('💥 [API ERROR] Trade execution failed:', tradeError);
             console.error('💥 [API ERROR] Trade details:', { asset: flow.asset, side: flow.type, size: flow.size, leverage: flow.leverage });
             
-            let userMessage = '❌ **Trade Failed** ';
+            let userMessage = await t(ctx, 'trade_failed_prefix');
             if (tradeError.message.includes('insufficient') || tradeError.message.includes('balance')) {
               userMessage += '❌ **Empty Futures Account!**\nYou have no USDT in your futures account to trade with.\n\n**To fix this:**\n1. Use `/deposit` to add USDT to your futures account\n2. Or transfer from spot using the Transfer button';
             } else if (tradeError.message.includes('not supported symbol') || tradeError.message.includes('symbol')) {
@@ -1574,15 +1585,23 @@ Your funds are now available in your futures account for trading.
       session.tradingFlow = null;
       await saveUserSessionData(userId, session);
       console.error('❌ [DEBUG] Transfer error:', error);
-      let userMessage = '❌ Transfer failed. ';
+      let userMessage = await t(ctx, 'transfer_failed_prefix');
       if (error.message.includes('insufficient') || error.message.includes('balance')) {
-        userMessage += 'Insufficient balance in your spot account. Please deposit more funds to your spot account first.';
+        userMessage += (await getUserLanguage(userId)) === 'zh'
+          ? '现货账户余额不足。请先向现货账户充值。'
+          : 'Insufficient balance in your spot account. Please deposit more funds to your spot account first.';
       } else if (error.message.includes('not supported') || error.message.includes('symbol')) {
-        userMessage += 'This asset is not supported for transfer. Please try USDT or another supported asset.';
+        userMessage += (await getUserLanguage(userId)) === 'zh'
+          ? '该资产不支持划转。请尝试 USDT 或其他受支持资产。'
+          : 'This asset is not supported for transfer. Please try USDT or another supported asset.';
       } else if (error.message.includes('network') || error.message.includes('timeout')) {
-        userMessage += 'Network connection issue. Please try again in a few moments.';
+        userMessage += (await getUserLanguage(userId)) === 'zh'
+          ? '网络连接问题。请稍后重试。'
+          : 'Network connection issue. Please try again in a few moments.';
       } else {
-        userMessage += 'Please check your spot balance and try again.';
+        userMessage += (await getUserLanguage(userId)) === 'zh'
+          ? '请检查您的现货余额后重试。'
+          : 'Please check your spot balance and try again.';
       }
       return ctx.reply(userMessage);
     }
@@ -1623,7 +1642,7 @@ Your funds are now available in your futures account for trading.
           }
           
           await ctx.reply(
-              `Size: ${size} USDT\nMax Leverage for ${symbol}: **${maxLeverage}x**\n\nSelect your leverage:`,
+              await t(ctx, 'leverage_prompt', { size, symbol, max: maxLeverage }),
               {
                   parse_mode: 'Markdown',
                   ...Markup.inlineKeyboard(leverageKeyboard)
