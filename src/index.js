@@ -1266,17 +1266,14 @@ bot.on('callback_query', async (ctx) => {
       // Get market price information
       const price = await asterAPI.getPrice(decrypt(session.apiKey), decrypt(session.apiSecret), symbol);
       
-      const marketDetails = `
-📊 ${symbol} Market Details
-
-💰 **Current Price:** $${price.price}
-📈 **24h Change:** ${price.change24h}%
-📊 **24h High:** $${price.high24h}
-📉 **24h Low:** $${price.low24h}
-📊 **24h Volume:** $${price.volume24h}
-
-Choose an action for this market:
-      `;
+      const marketDetails = await t(ctx, 'market_details_block', {
+        symbol,
+        price: price.price,
+        change: price.change24h,
+        high: price.high24h,
+        low: price.low24h,
+        volume: price.volume24h
+      });
       
     const keyboard = Markup.inlineKeyboard([
       [
@@ -1291,7 +1288,7 @@ Choose an action for this market:
       return ctx.editMessageText(marketDetails, { parse_mode: 'Markdown', ...keyboard });
     } catch (error) {
       console.error('❌ [DEBUG] Error fetching market details:', error);
-      return ctx.editMessageText('❌ Unable to fetch market details. Please try again.');
+      return ctx.editMessageText(await t(ctx, 'market_details_unable_fetch'));
     }
   }
 
