@@ -170,7 +170,19 @@ const TRANSLATIONS = {
     invalid_transfer_amount: '❌ Invalid amount. Please enter a valid number (e.g., 25):',
     invalid_size_number: 'Invalid size. Please enter a positive number.',
     fetching_leverage: 'Fetching leverage options for ${symbol}...',
-    leverage_prompt: 'Size: ${size} USDT\nMax Leverage for ${symbol}: **${max}x**\n\nSelect your leverage:'
+    leverage_prompt: 'Size: ${size} USDT\nMax Leverage for ${symbol}: **${max}x**\n\nSelect your leverage:',
+    cancel_done: '✅ Action cancelled. You are no longer in a trading flow.',
+    price_unable_fetch: '❌ Unable to fetch price. Please make sure you use a valid trading pair like BTCUSDT.',
+    require_start_cb: 'Please use /start to initialize your bot.',
+    expired_browse: 'Market browsing has expired. Please start again.',
+    already_on_page: 'You are already on this page.',
+    error_loading_markets_page: 'Error loading markets page',
+    markets_pagination_info: 'Market browsing pagination info',
+    market_selection_expired: 'Market selection has expired. Please start again.',
+    processing_trade: '⏳ Processing your trade...',
+    trade_cancelled: '❌ Trade cancelled.',
+    error_generic: 'An error occurred.',
+    error_processing_text: '❌ An error occurred while processing your message. Please try again.'
   },
   zh: {
     rate_limit: '⏳ 频率限制已超出\n请稍后再试。',
@@ -227,7 +239,19 @@ const TRANSLATIONS = {
     invalid_transfer_amount: '❌ 无效金额。请输入有效数字（例如 25）：',
     invalid_size_number: '无效大小。请输入正数。',
     fetching_leverage: '正在获取 ${symbol} 的杠杆选项…',
-    leverage_prompt: '大小：${size} USDT\n${symbol} 的最大杠杆：**${max}x**\n\n请选择杠杆：'
+    leverage_prompt: '大小：${size} USDT\n${symbol} 的最大杠杆：**${max}x**\n\n请选择杠杆：',
+    cancel_done: '✅ 已取消操作。您不再处于交易流程中。',
+    price_unable_fetch: '❌ 无法获取价格，请确认交易对是否有效（如 BTCUSDT）。',
+    require_start_cb: '请先使用 /start 初始化机器人。',
+    expired_browse: '市场浏览已过期，请重新开始。',
+    already_on_page: '您已在此页。',
+    error_loading_markets_page: '加载市场页面出错',
+    markets_pagination_info: '市场分页信息',
+    market_selection_expired: '市场选择已过期，请重新开始。',
+    processing_trade: '⏳ 正在处理您的交易…',
+    trade_cancelled: '❌ 交易已取消。',
+    error_generic: '发生错误。',
+    error_processing_text: '❌ 处理您的消息时发生错误，请重试。'
   }
 };
 
@@ -361,7 +385,7 @@ bot.command('cancel', async (ctx) => {
       session.tradingFlow = null;
       await saveUserSessionData(userId, session);
   }
-  await ctx.reply('✅ Action cancelled. You are no longer in a trading flow.');
+  await ctx.reply(await t(ctx, 'cancel_done'));
 });
 
 // Help command
@@ -765,7 +789,7 @@ bot.command('price', async (ctx) => {
     await ctx.reply(priceMessage, { parse_mode: 'Markdown' });
   } catch (error) {
     console.error('❌ [DEBUG] Price command error:', error);
-    await ctx.reply('❌ Unable to fetch price. Please make sure you use a valid trading pair like BTCUSDT.');
+    await ctx.reply(await t(ctx, 'price_unable_fetch'));
   }
 });
 
@@ -932,7 +956,7 @@ bot.on('callback_query', async (ctx) => {
       await saveUserSessionData(userId, session);
     } else {
       // If no session exists at all, ask user to /start
-      return ctx.answerCbQuery('Please use /start to initialize your bot.', { show_alert: true });
+      return ctx.answerCbQuery(await t(ctx, 'require_start_cb'), { show_alert: true });
     }
   }
 
@@ -1143,13 +1167,13 @@ Do you understand the risks and wish to proceed?
     const flow = session.tradingFlow;
     
     if (!flow || flow.step !== 'browse_markets') {
-      await ctx.answerCbQuery('Market browsing has expired. Please start again.', { show_alert: true });
+      await ctx.answerCbQuery(await t(ctx, 'expired_browse'), { show_alert: true });
       return;
     }
     
     // Check if we're already on this page
     if (flow.page === page) {
-      await ctx.answerCbQuery('You are already on this page.', { show_alert: false });
+      await ctx.answerCbQuery(await t(ctx, 'already_on_page'), { show_alert: false });
       return;
     }
     
@@ -1197,13 +1221,13 @@ Do you understand the risks and wish to proceed?
       return ctx.editMessageText(message, Markup.inlineKeyboard(keyboard));
     } catch (error) {
       console.error('❌ Markets pagination error:', error);
-      await ctx.answerCbQuery('Error loading markets page', { show_alert: true });
+      await ctx.answerCbQuery(await t(ctx, 'error_loading_markets_page'), { show_alert: true });
       return;
     }
   }
   
   if (data === 'markets_browse_info') {
-    await ctx.answerCbQuery('Market browsing pagination info', { show_alert: false });
+    await ctx.answerCbQuery(await t(ctx, 'markets_pagination_info'), { show_alert: false });
     return;
   }
 
@@ -1271,7 +1295,7 @@ Choose an action for this market:
     const flow = session.tradingFlow;
     
     if (!flow || flow.step !== 'select_asset') {
-      return ctx.answerCbQuery('Market selection has expired. Please start again.', { show_alert: true });
+      return ctx.answerCbQuery(await t(ctx, 'market_selection_expired'), { show_alert: true });
     }
     
     try {
@@ -1389,7 +1413,7 @@ Your position has been closed and funds are available in your account.
     } else if (flow.step === 'confirm' && data === 'confirm_trade') {
         console.log('🎯 Confirm trade clicked - executing trade...');
         await ctx.answerCbQuery();
-        await ctx.editMessageText('⏳ Processing your trade...');
+        await ctx.editMessageText(await t(ctx, 'processing_trade'));
         
         try {
             console.log(`🎯 [TRADE] Executing ${flow.type} order: ${flow.asset}, size: ${flow.size}, leverage: ${flow.leverage}`);
@@ -1437,11 +1461,11 @@ Your position has been closed and funds are available in your account.
         session.tradingFlow = null; // End the flow
         await saveUserSessionData(userId, session);
         await ctx.answerCbQuery();
-        await ctx.editMessageText('❌ Trade cancelled.');
+        await ctx.editMessageText(await t(ctx, 'trade_cancelled'));
     }
   } catch (error) {
     if (session) session.tradingFlow = null; // End the flow on error
-    await ctx.answerCbQuery('An error occurred.', { show_alert: true });
+    await ctx.answerCbQuery(await t(ctx, 'error_generic'), { show_alert: true });
     console.error('❌ [DEBUG] Error during trade:', error);
     let userMessage = '❌ Trading failed. ';
     if (error.message.includes('insufficient') || error.message.includes('balance')) {
@@ -1466,7 +1490,7 @@ Your position has been closed and funds are available in your account.
     console.error(`💥 [ERROR] Callback data: ${ctx.callbackQuery?.data}, User: ${ctx.from?.id}`);
     
     try {
-      await ctx.answerCbQuery('An error occurred. Please try again.', { show_alert: true });
+      await ctx.answerCbQuery(await t(ctx, 'error_generic'), { show_alert: true });
     } catch (answerError) {
       console.error('💥 [ERROR] Failed to answer callback query:', answerError);
       console.error('💥 [ERROR] Answer error stack:', answerError.stack);
@@ -1493,7 +1517,7 @@ bot.on('text', async (ctx) => {
     try {
       const amount = parseFloat(ctx.message.text);
       if (isNaN(amount) || amount <= 0) {
-        return ctx.reply('Invalid amount. Please enter a positive number for USDT deposit.');
+      return ctx.reply(await t(ctx, 'invalid_deposit_amount'));
       }
 
       // Clear the trading flow and handle deposit
@@ -1514,7 +1538,7 @@ bot.on('text', async (ctx) => {
       const amount = parseFloat(ctx.message.text);
 
       if (isNaN(amount) || amount <= 0) {
-        return ctx.reply('❌ Invalid amount. Please enter a valid number (e.g., 25):');
+        return ctx.reply(await t(ctx, 'invalid_transfer_amount'));
       }
 
       // Clear the trading flow and handle transfer
@@ -1559,7 +1583,7 @@ Your funds are now available in your futures account for trading.
       try {
           const size = parseFloat(ctx.message.text);
           if (isNaN(size) || size <= 0) {
-              return ctx.reply('Invalid size. Please enter a positive number.');
+              return ctx.reply(await t(ctx, 'invalid_size_number'));
           }
 
           session.tradingFlow.size = size;
@@ -1621,7 +1645,7 @@ Your funds are now available in your futures account for trading.
     console.error(`💥 [ERROR] Text: ${ctx.message?.text}, User: ${ctx.from?.id}`);
     
     try {
-      await ctx.reply('❌ An error occurred while processing your message. Please try again.');
+      await ctx.reply(await t(ctx, 'error_processing_text'));
     } catch (replyError) {
       console.error('💥 [ERROR] Failed to send error reply:', replyError);
     }
