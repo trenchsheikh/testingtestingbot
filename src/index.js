@@ -760,11 +760,11 @@ bot.command('markets', async (ctx) => {
     const navButtons = [];
     if (totalPages > 1) {
       if (currentPage > 0) {
-        navButtons.push(Markup.button.callback('⬅️ Previous', `markets_browse_page_${currentPage - 1}`));
+        navButtons.push(Markup.button.callback('⬅️', `markets_browse_page_${currentPage - 1}`));
       }
-      navButtons.push(Markup.button.callback(`Page ${currentPage + 1}/${totalPages}`, 'markets_browse_info'));
+      navButtons.push(Markup.button.callback(`第 ${currentPage + 1}/${totalPages} 页`, 'markets_browse_info'));
       if (currentPage < totalPages - 1) {
-        navButtons.push(Markup.button.callback('Next ➡️', `markets_browse_page_${currentPage + 1}`));
+        navButtons.push(Markup.button.callback('➡️', `markets_browse_page_${currentPage + 1}`));
       }
       keyboard.push(navButtons);
     }
@@ -1096,13 +1096,13 @@ bot.on('callback_query', async (ctx) => {
       // Add navigation buttons
       const navButtons = [];
       if (totalPages > 1) {
-        if (currentPage > 0) {
-          navButtons.push(Markup.button.callback('⬅️ Previous', `markets_browse_page_${currentPage - 1}`));
-        }
-        navButtons.push(Markup.button.callback(`Page ${currentPage + 1}/${totalPages}`, 'markets_browse_info'));
-        if (currentPage < totalPages - 1) {
-          navButtons.push(Markup.button.callback('Next ➡️', `markets_browse_page_${currentPage + 1}`));
-        }
+      if (currentPage > 0) {
+        navButtons.push(Markup.button.callback('⬅️', `markets_browse_page_${currentPage - 1}`));
+      }
+      navButtons.push(Markup.button.callback(`第 ${currentPage + 1}/${totalPages} 页`, 'markets_browse_info'));
+      if (currentPage < totalPages - 1) {
+        navButtons.push(Markup.button.callback('➡️', `markets_browse_page_${currentPage + 1}`));
+      }
         keyboard.push(navButtons);
       }
       
@@ -1218,13 +1218,13 @@ bot.on('callback_query', async (ctx) => {
       // Add navigation buttons
       const navButtons = [];
       if (totalPages > 1) {
-        if (page > 0) {
-          navButtons.push(Markup.button.callback('⬅️ Previous', `markets_browse_page_${page - 1}`));
-        }
-        navButtons.push(Markup.button.callback(`Page ${page + 1}/${totalPages}`, 'markets_browse_info'));
-        if (page < totalPages - 1) {
-          navButtons.push(Markup.button.callback('Next ➡️', `markets_browse_page_${page + 1}`));
-        }
+      if (page > 0) {
+        navButtons.push(Markup.button.callback('⬅️', `markets_browse_page_${page - 1}`));
+      }
+      navButtons.push(Markup.button.callback(`第 ${page + 1}/${totalPages} 页`, 'markets_browse_info'));
+      if (page < totalPages - 1) {
+        navButtons.push(Markup.button.callback('➡️', `markets_browse_page_${page + 1}`));
+      }
         keyboard.push(navButtons);
       }
       
@@ -1338,12 +1338,12 @@ Choose an action for this market:
       // Add navigation buttons
       const navButtons = [];
       if (totalPages > 1) {
-        if (page > 0) {
-          navButtons.push(Markup.button.callback('⬅️ Previous', `markets_page_${page - 1}`));
+      if (page > 0) {
+          navButtons.push(Markup.button.callback('⬅️', `markets_page_${page - 1}`));
         }
-        navButtons.push(Markup.button.callback(`Page ${page + 1}/${totalPages}`, 'markets_info'));
+        navButtons.push(Markup.button.callback(`第 ${page + 1}/${totalPages} 页`, 'markets_info'));
         if (page < totalPages - 1) {
-          navButtons.push(Markup.button.callback('Next ➡️', `markets_page_${page + 1}`));
+          navButtons.push(Markup.button.callback('➡️', `markets_page_${page + 1}`));
         }
         keyboard.push(navButtons);
       }
