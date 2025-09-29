@@ -282,18 +282,6 @@ const TRANSLATIONS = {
     export_cancelled: '❌ 私钥导出已取消。',
     btn_export_yes: '✅ 是，导出我的私钥',
     btn_export_no: '❌ 取消'
-    cancel_done: '✅ 已取消操作。您不再处于交易流程中。',
-    price_unable_fetch: '❌ 无法获取价格，请确认交易对是否有效（如 BTCUSDT）。',
-    require_start_cb: '请先使用 /start 初始化机器人。',
-    expired_browse: '市场浏览已过期，请重新开始。',
-    already_on_page: '您已在此页。',
-    error_loading_markets_page: '加载市场页面出错',
-    markets_pagination_info: '市场分页信息',
-    market_selection_expired: '市场选择已过期，请重新开始。',
-    processing_trade: '⏳ 正在处理您的交易…',
-    trade_cancelled: '❌ 交易已取消。',
-    error_generic: '发生错误。',
-    error_processing_text: '❌ 处理您的消息时发生错误，请重试。'
   }
 };
 
