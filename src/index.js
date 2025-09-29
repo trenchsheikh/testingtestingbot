@@ -111,6 +111,79 @@ function decrypt(encryptedText) {
 }
 
 
+// i18n: language support (English, Chinese)
+const SUPPORTED_LANGUAGES = ['en', 'zh'];
+
+const TRANSLATIONS = {
+  en: {
+    rate_limit: '⏳ Rate Limit Exceeded\nPlease wait a moment before trying again.',
+    start_creating: '👋 Welcome! Creating your secure wallet and API keys...',
+    start_complete: '✅ **Setup Complete!**\nYour unique BEP-20 wallet address is:\n`${wallet}`\n\n**IMPORTANT**: Send funds (USDT, BNB etc.) to this address to begin trading.',
+    require_start: 'Please use /start first to set up your account.',
+    require_start_wallet: 'Please use /start first to generate a wallet.',
+    main_title: '🎯 AsterDex Trading Bot - Main Menu',
+    main_wallet: '**Wallet:** `${wallet}`',
+    main_choose: 'Choose an action from the menu below or use commands directly:',
+    btn_balance: '💰 Balance',
+    btn_positions: '📊 Positions',
+    btn_long: '📈 Long Position',
+    btn_short: '📉 Short Position',
+    btn_deposit: '💸 Deposit',
+    btn_transfer: '🔄 Transfer',
+    btn_markets: '📋 Markets',
+    btn_close: '❌ Close Position',
+    btn_export: '🔑 Export Key',
+    help: '📋 Available Commands:\n/start - Start the bot & create your wallet\n/menu - Show the main menu with buttons\n/balance - Check all your balances (Wallet, Spot, Futures)\n/deposit [amount] - Deposit USDT from wallet to Futures\n/transfer [amount] [asset] - Transfer from Spot to Futures\n/export - Export your wallet\'s private key\n/long & /short - Start opening a trade\n/positions - View your open positions\n/close - Select a position to close\n/cancel - Cancel your current action\n/language - Set your language (English/中文)',
+    deposit_enter_amount: '💸 Deposit Funds\n\nEnter the amount of USDT you want to deposit:\n\nExample: `50`',
+    transfer_enter_amount: '🔄 Transfer Funds\n\nEnter the amount of USDT to transfer from Spot to Futures:\n\nExample: `25`',
+    language_prompt: '🌐 Select your language:',
+    language_set_en: '✅ Language set to English.',
+    language_set_zh: '✅ 语言已切换为中文。'
+  },
+  zh: {
+    rate_limit: '⏳ 频率限制已超出\n请稍后再试。',
+    start_creating: '👋 欢迎！正在为您创建安全钱包和 API 密钥…',
+    start_complete: '✅ **设置完成！**\n您的 BEP-20 钱包地址：\n`${wallet}`\n\n**重要提示**：请向该地址转入 USDT、BNB 等以开始交易。',
+    require_start: '请先使用 /start 完成账户设置。',
+    require_start_wallet: '请先使用 /start 生成钱包。',
+    main_title: '🎯 AsterDex 交易机器人 - 主菜单',
+    main_wallet: '**钱包：** `${wallet}`',
+    main_choose: '请从下面的菜单选择操作，或直接输入命令：',
+    btn_balance: '💰 余额',
+    btn_positions: '📊 持仓',
+    btn_long: '📈 做多',
+    btn_short: '📉 做空',
+    btn_deposit: '💸 充值',
+    btn_transfer: '🔄 划转',
+    btn_markets: '📋 市场',
+    btn_close: '❌ 平仓',
+    btn_export: '🔑 导出私钥',
+    help: '📋 可用命令：\n/start - 启动机器人并创建钱包\n/menu - 显示主菜单\n/balance - 查询全部余额\n/deposit [金额] - 从钱包充值 USDT 到合约\n/transfer [金额] [资产] - 从现货划转到合约\n/export - 导出钱包私钥\n/long & /short - 开始开仓\n/positions - 查看持仓\n/close - 选择持仓平仓\n/cancel - 取消当前操作\n/language - 设置语言（English/中文）',
+    deposit_enter_amount: '💸 充值\n\n请输入要充值的 USDT 数量：\n\n示例：`50`',
+    transfer_enter_amount: '🔄 划转\n\n请输入要从现货划转到合约的 USDT 数量：\n\n示例：`25`',
+    language_prompt: '🌐 请选择语言：',
+    language_set_en: '✅ 已切换为 English。',
+    language_set_zh: '✅ 语言已切换为中文。'
+  }
+};
+
+async function getUserLanguage(userId) {
+  const session = await loadUserSession(userId);
+  const lang = session?.language;
+  return SUPPORTED_LANGUAGES.includes(lang) ? lang : 'en';
+}
+
+async function t(ctx, key, vars = {}) {
+  const lang = await getUserLanguage(ctx.from.id);
+  let template = (TRANSLATIONS[lang] && TRANSLATIONS[lang][key]) || TRANSLATIONS.en[key] || '';
+  Object.keys(vars).forEach(k => {
+    const token = '${' + k + '}';
+    while (template.includes(token)) template = template.replace(token, String(vars[k]));
+  });
+  return template;
+}
+
+
 // Function to show the main menu
 async function showMainMenu(ctx) {
   const userId = ctx.from.id;
@@ -118,33 +191,32 @@ async function showMainMenu(ctx) {
   
   const menuKeyboard = Markup.inlineKeyboard([
     [
-      Markup.button.callback('💰 Balance', 'menu_balance'),
-      Markup.button.callback('📊 Positions', 'menu_positions')
+      Markup.button.callback(await t(ctx, 'btn_balance'), 'menu_balance'),
+      Markup.button.callback(await t(ctx, 'btn_positions'), 'menu_positions')
     ],
     [
-      Markup.button.callback('📈 Long Position', 'menu_long'),
-      Markup.button.callback('📉 Short Position', 'menu_short')
+      Markup.button.callback(await t(ctx, 'btn_long'), 'menu_long'),
+      Markup.button.callback(await t(ctx, 'btn_short'), 'menu_short')
     ],
     [
-      // --- MODIFIED LINE ---
-      Markup.button.callback('💸 Deposit', 'menu_deposit'), 
-      Markup.button.callback('🔄 Transfer', 'menu_transfer')
+      Markup.button.callback(await t(ctx, 'btn_deposit'), 'menu_deposit'), 
+      Markup.button.callback(await t(ctx, 'btn_transfer'), 'menu_transfer')
     ],
     [
-      Markup.button.callback('📋 Markets', 'menu_markets'),
-      Markup.button.callback('❌ Close Position', 'menu_close')
+      Markup.button.callback(await t(ctx, 'btn_markets'), 'menu_markets'),
+      Markup.button.callback(await t(ctx, 'btn_close'), 'menu_close')
     ],
     [
-       Markup.button.callback('🔑 Export Key', 'menu_export')
+       Markup.button.callback(await t(ctx, 'btn_export'), 'menu_export')
     ]
   ]);
 
   const menuMessage = `
-🎯 AsterDex Trading Bot - Main Menu
+${await t(ctx, 'main_title')}
 
-**Wallet:** \`${session?.walletAddress || 'Not initialized'}\`
+${await t(ctx, 'main_wallet', { wallet: session?.walletAddress || 'Not initialized' })}
 
-Choose an action from the menu below or use commands directly:
+${await t(ctx, 'main_choose')}
   `;
 
   // Use editMessageText if possible, otherwise send a new message
@@ -172,7 +244,7 @@ bot.start(async (ctx) => {
   
   // Rate limiting: max 20 /start commands per minute
   if (!checkRateLimit(userId, 'start', 20, 60000)) {
-    return ctx.reply('⏳ **Rate Limit Exceeded**\nPlease wait a moment before trying again.');
+    return ctx.reply(await t(ctx, 'rate_limit'));
   }
 
   // 1. Try to load the user from the database
@@ -185,7 +257,7 @@ bot.start(async (ctx) => {
 
   // 2. If user does NOT exist, create a new wallet and session
   try {
-      await ctx.reply('👋 Welcome! Creating your secure wallet and API keys...');
+      await ctx.reply(await t(ctx, 'start_creating'));
 
       const newWallet = BNBWallet.createWallet();
       const apiKeys = await asterAPI.createApiKeysForWallet(newWallet);
@@ -197,13 +269,14 @@ bot.start(async (ctx) => {
           apiKey: encrypt(apiKeys.apiKey), // Encrypt API key
           apiSecret: encrypt(apiKeys.apiSecret), // Encrypt API secret
           isInitialized: true,
-          tradingFlow: null
+          tradingFlow: null,
+          language: 'en'
       };
 
       // 3. Save the new session to the database
       await saveUserSession(userId, newSession);
 
-      const welcomeMessage = `✅ **Setup Complete!**\nYour unique BEP-20 wallet address is:\n\`${newSession.walletAddress}\`\n\n**IMPORTANT**: Send funds (USDT, BNB etc.) to this address to begin trading.`;
+      const welcomeMessage = await t(ctx, 'start_complete', { wallet: newSession.walletAddress });
       await ctx.reply(welcomeMessage, { parse_mode: 'Markdown' });
 
       await showMainMenu(ctx);
@@ -230,17 +303,7 @@ bot.command('cancel', async (ctx) => {
 bot.help(async (ctx) => {
   // --- MODIFIED TEXT ---
   const helpText = `
-📋 Available Commands:
-/start - Start the bot & create your wallet
-/menu - Show the main menu with buttons
-/balance - Check all your balances (Wallet, Spot, Futures)
-/deposit [amount] - Alternative to /transfer . Deposit USDT directly from your wallet to Futures account
-/transfer [amount] [asset] - Transfer from your Spot to Futures account . You will need to manually deposit USDT to your Spot account.
-/export - Export your wallet's private key
-/long & /short - Start opening a trade
-/positions - View your open positions
-/close - Select a position to close
-/cancel - Cancel your current action (like an open trade)
+${await t(ctx, 'help')}
   `;
   await ctx.reply(helpText, { parse_mode: 'Markdown' });
 });
@@ -251,40 +314,34 @@ bot.command('menu', async (ctx) => {
   const session = await getUserSession(userId);
   
   if (!session?.isInitialized) {
-    return ctx.reply('Please use /start first to set up your account.');
+    return ctx.reply(await t(ctx, 'require_start'));
   }
 
   const menuKeyboard = Markup.inlineKeyboard([
     [
-      Markup.button.callback('💰 Balance', 'menu_balance'),
-      Markup.button.callback('📊 Positions', 'menu_positions')
+      Markup.button.callback(await t(ctx, 'btn_balance'), 'menu_balance'),
+      Markup.button.callback(await t(ctx, 'btn_positions'), 'menu_positions')
     ],
     [
-      Markup.button.callback('📈 Long Position', 'menu_long'),
-      Markup.button.callback('📉 Short Position', 'menu_short')
+      Markup.button.callback(await t(ctx, 'btn_long'), 'menu_long'),
+      Markup.button.callback(await t(ctx, 'btn_short'), 'menu_short')
     ],
     [
-      Markup.button.callback('💸 Transfer Funds', 'menu_transfer'),
-      Markup.button.callback('🔑 Export Key', 'menu_export')
+      Markup.button.callback(await t(ctx, 'btn_transfer'), 'menu_transfer'),
+      Markup.button.callback(await t(ctx, 'btn_export'), 'menu_export')
     ],
     [
-      Markup.button.callback('📋 Markets', 'menu_markets'),
-      Markup.button.callback('❌ Close Position', 'menu_close')
+      Markup.button.callback(await t(ctx, 'btn_markets'), 'menu_markets'),
+      Markup.button.callback(await t(ctx, 'btn_close'), 'menu_close')
     ]
   ]);
 
   const menuMessage = `
-🎯 AsterDex Trading Bot - Main Menu
+${await t(ctx, 'main_title')}
 
-**Wallet:** \`${session.walletAddress}\`
+${await t(ctx, 'main_wallet', { wallet: session.walletAddress })}
 
-Choose an action from the menu below or use commands directly:
-• Type /long or /short to trade
-• Type /transfer 25 USDT to transfer funds
-• Type /balance to check your balance
-• Type /export to export your private key
-
-💡 **Tip:** You can use both buttons and commands!
+${await t(ctx, 'main_choose')}
   `;
 
   await ctx.reply(menuMessage, { 
@@ -301,7 +358,7 @@ bot.command('export', async (ctx) => {
   const session = await getUserSession(userId);
 
   if (!session?.isInitialized || !session.privateKey) {
-    return ctx.reply('Please use /start first to generate a wallet.');
+    return ctx.reply(await t(ctx, 'require_start_wallet'));
   }
 
   const warningMessage = `
@@ -325,6 +382,17 @@ Do you understand the risks and wish to proceed?
   await ctx.reply(warningMessage, { parse_mode: 'Markdown', ...keyboard });
 });
 
+// Language selection command
+bot.command('language', async (ctx) => {
+  const keyboard = Markup.inlineKeyboard([
+    [
+      Markup.button.callback('English', 'lang_en'),
+      Markup.button.callback('中文', 'lang_zh')
+    ]
+  ]);
+  await ctx.reply(await t(ctx, 'language_prompt'), keyboard);
+});
+
 
 // Shared deposit function
 async function handleDepositRequest(ctx, amount) {
@@ -332,13 +400,13 @@ async function handleDepositRequest(ctx, amount) {
   
   // Rate limiting: max 10 deposits per minute
   if (!checkRateLimit(userId, 'deposit', 10, 60000)) {
-    return ctx.reply('⏳ **Rate Limit Exceeded**\nPlease wait a moment before making another deposit.');
+    return ctx.reply(await t(ctx, 'rate_limit'));
   }
   
   const session = await getUserSession(userId);
   
   if (!session?.isInitialized) {
-    return ctx.reply('Please use /start first.');
+    return ctx.reply(await t(ctx, 'require_start'));
   }
 
   const ASTER_TREASURY_ADDRESS = '0x128463A60784c4D3f46c23Af3f65Ed859Ba87974';
@@ -405,7 +473,7 @@ async function handleBalanceRequest(ctx) {
   
   // Rate limiting: max 50 balance checks per minute
   if (!checkRateLimit(userId, 'balance', 50, 60000)) {
-    return ctx.reply('⏳ **Rate Limit Exceeded**\nPlease wait a moment before checking your balance again.');
+    return ctx.reply(await t(ctx, 'rate_limit'));
   }
   
   const session = await getUserSession(userId);
@@ -473,7 +541,7 @@ bot.command('transfer', async (ctx) => {
     
     // Rate limiting: max 20 transfers per minute
     if (!checkRateLimit(userId, 'transfer', 20, 60000)) {
-      return ctx.reply('⏳ **Rate Limit Exceeded**\nPlease wait a moment before making another transfer.');
+      return ctx.reply(await t(ctx, 'rate_limit'));
     }
     
     const args = ctx.message.text.split(' ');
@@ -540,7 +608,7 @@ bot.command('markets', async (ctx) => {
   
   // Rate limiting: max 60 market requests per minute
   if (!checkRateLimit(userId, 'markets', 60, 60000)) {
-    return ctx.reply('⏳ **Rate Limit Exceeded**\nPlease wait a moment before browsing markets again.');
+    return ctx.reply(await t(ctx, 'rate_limit'));
   }
   
   let session = await getUserSession(userId);
@@ -652,7 +720,7 @@ const startTradingFlow = async (ctx, tradeType) => {
   
   // Rate limiting: max 30 trading attempts per minute
   if (!checkRateLimit(userId, 'trading', 30, 60000)) {
-    return ctx.reply('⏳ **Rate Limit Exceeded**\nPlease wait a moment before making another trade.');
+    return ctx.reply(await t(ctx, 'rate_limit'));
   }
   
   const session = await getUserSession(userId);
@@ -814,6 +882,16 @@ bot.on('callback_query', async (ctx) => {
   }
 
   // --- Main Menu Buttons ---
+  if (data === 'lang_en' || data === 'lang_zh') {
+    const nextLang = data === 'lang_en' ? 'en' : 'zh';
+    session.language = nextLang;
+    await saveUserSessionData(userId, session);
+    await ctx.answerCbQuery();
+    const msg = nextLang === 'en' ? TRANSLATIONS.en.language_set_en : TRANSLATIONS.zh.language_set_zh;
+    await ctx.reply(msg);
+    return showMainMenu(ctx);
+  }
+
   if (data === 'menu_balance') {
     await ctx.answerCbQuery();
     return handleBalanceRequest(ctx);
@@ -863,14 +941,14 @@ bot.on('callback_query', async (ctx) => {
     // Set up deposit flow state
     session.tradingFlow = { step: 'enter_deposit_amount' };
     await saveUserSessionData(userId, session);
-    return ctx.reply('💸 Deposit Funds\n\nEnter the amount of USDT you want to deposit:\n\nExample: `50`', { parse_mode: 'Markdown' });
+    return ctx.reply(await t(ctx, 'deposit_enter_amount'), { parse_mode: 'Markdown' });
   }
   if (data === 'menu_transfer') {
     await ctx.answerCbQuery();
     // Set up transfer flow state
     session.tradingFlow = { step: 'enter_transfer_amount' };
     await saveUserSessionData(userId, session);
-    return ctx.reply('🔄 Transfer Funds\n\nEnter the amount of USDT to transfer from Spot to Futures:\n\nExample: `25`', { parse_mode: 'Markdown' });
+    return ctx.reply(await t(ctx, 'transfer_enter_amount'), { parse_mode: 'Markdown' });
   }
   if (data === 'menu_markets') {
     await ctx.answerCbQuery();

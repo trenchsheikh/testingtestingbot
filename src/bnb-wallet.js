@@ -1,5 +1,4 @@
 // src/bnb-wallet.js
-
 import { ethers } from 'ethers';
 
 const BSC_RPC_URL = process.env.BSC_RPC_URL;
