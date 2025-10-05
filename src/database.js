@@ -48,15 +48,23 @@ async function connectToDatabase() {
   }
 }
 
+// src/database.js
+
 // Function to save or update a user's session
 export async function saveUserSession(userId, sessionData) {
   const database = await connectToDatabase();
   const users = database.collection('users');
 
-  // Use 'updateOne' with 'upsert: true' to either update an existing user or create a new one
+  // This corrected logic adds the totalVolume field only when a new user is created
+  // and prevents it from being overwritten later.
+  const updateData = {
+    $set: sessionData,
+    $setOnInsert: { totalVolume: 0 } 
+  };
+
   await users.updateOne(
     { _id: userId },
-    { $set: sessionData },
+    updateData,
     { upsert: true }
   );
   console.log(`💾 [DB] Saved session for user: ${userId}`);
@@ -71,4 +79,35 @@ export async function loadUserSession(userId) {
     console.log(`🔍 [DB] Loaded session for user: ${userId}`);
   }
   return session;
+}
+
+
+/**
+ * Atomically increments the total trade volume for a specific user.
+ * @param {number} userId - The user's Telegram ID.
+ * @param {number} tradeVolume - The volume from the latest trade (in USDT).
+ */
+export async function updateUserVolume(userId, tradeVolume) {
+  if (isNaN(tradeVolume) || tradeVolume <= 0) return;
+  const database = await connectToDatabase();
+  const users = database.collection('users');
+
+  await users.updateOne(
+      { _id: userId },
+      { $inc: { totalVolume: tradeVolume } } // Use $inc to safely increment the value
+  );
+  console.log(`📈 [DB] Updated volume for user ${userId} by ${tradeVolume}.`);
+}
+
+// --- NEW FUNCTION TO GET ALL USERS ---
+/**
+* Loads all user sessions from the database.
+* @returns {Promise<Array>} - An array of all user documents.
+*/
+export async function loadAllUserSessions() {
+  const database = await connectToDatabase();
+  const users = database.collection('users');
+  const sessions = await users.find({}).toArray();
+  console.log(`[DB] Loaded ${sessions.length} total user sessions for backend task.`);
+  return sessions;
 }
