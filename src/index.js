@@ -3,7 +3,7 @@ import { Telegraf, Markup } from 'telegraf';
 import crypto from 'crypto';
 import { AsterAPI } from './asterdex.js';
 import { BNBWallet } from './bnb-wallet.js';
-import { saveUserSession, loadUserSession } from './database.js';
+import { saveUserSession, loadUserSession, loadAllUserSessions, updateUserVolume } from './database.js'
 import { startKeepAliveServer } from './web.js';
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -1441,6 +1441,14 @@ Your position has been closed and funds are available in your account.
             symbol: flow.asset, side: flow.type, size: flow.size, leverage: flow.leverage
         });
             console.log(`✅ [TRADE] Order successful:`, result);
+
+            // --- THIS IS THE NEW LOGIC TO ADD ---
+            // After a successful trade, capture and store the volume from the `cumQuote` field.
+            const tradeVolume = parseFloat(result.cumQuote);
+            if (tradeVolume > 0) {
+                await updateUserVolume(userId, tradeVolume);
+            }
+            // --- END OF NEW LOGIC ---
             
         session.tradingFlow = null; // End the flow
             await saveUserSessionData(userId, session);
@@ -1716,6 +1724,39 @@ try {
   console.error('❌ [DEBUG] Failed to set bot command menu:', error);
 }
 
+// --- ADD THE BACKEND LOGGING FUNCTIONALITY BELOW ---
+
+/**
+ * Fetches and logs the stored trade volume for all users from the database.
+ */
+async function logAllUserTotalVolumes() {
+    console.log('🔄 [BACKEND_TASK] Starting job: Log all user total volumes...');
+    try {
+        const allUsers = await loadAllUserSessions();
+        if (allUsers.length === 0) {
+            console.log('ℹ️ [BACKEND_TASK] No users found. Skipping volume logging.');
+            return;
+        }
+        console.log('--- User Trade Volume Report ---');
+        for (const user of allUsers) {
+            const userId = user._id;
+            const totalVolume = user.totalVolume || 0; // Default to 0
+            console.log(`[USER_VOLUME] UserID: ${userId} | Total Volume: ${totalVolume.toFixed(2)} USDT`);
+        }
+        console.log('--- End of Report ---');
+    } catch (error) {
+        console.error('❌ [BACKEND_TASK] Critical error in logAllUserTotalVolumes job:', error);
+    } finally {
+        console.log('✅ [BACKEND_TASK] Finished job: Log all user total volumes.');
+    }
+}
+
+// --- SCHEDULE AND START THE SERVER/BOT ---
+
+// Schedule the volume logging task to run every 24 hours.
+const LOGGING_INTERVAL = 24 * 60 * 60 * 1000;
+setInterval(logAllUserTotalVolumes, LOGGING_INTERVAL);
+
 console.log('🚀 Starting bot launch...');
 
 // Add comprehensive error handling for uncaught exceptions
@@ -1738,12 +1779,15 @@ setInterval(() => {
   console.log(`📊 [MEMORY] RSS: ${Math.round(memUsage.rss / 1024 / 1024)}MB, Heap: ${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`);
 }, 30000); // Every 30 seconds
 
-startKeepAliveServer();
+// --- UPDATE THIS LINE ---
+// Pass the asterAPI instance to the web server
+startKeepAliveServer(asterAPI);
+
 bot.launch().then(() => {
-  
   console.log('🚀 AsterDex Multi-User Bot started successfully!');
   console.log('✅ Bot is ready to receive commands');
-  
+  // Run the logging task once, 1 minute after startup
+  setTimeout(logAllUserTotalVolumes, 60 * 1000);
 }).catch((error) => {
   console.error('❌ [CRASH] Bot launch failed:', error);
   console.error('❌ [CRASH] Launch error stack:', error.stack);

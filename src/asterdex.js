@@ -713,4 +713,22 @@ export class AsterAPI {
             return [];
         }
     }
+    
+    async getKlines(symbol, interval = '1h', limit = 500) {
+        try {
+            console.log(`Fetching k-lines for ${symbol} with interval ${interval}`);
+            const response = await this.futuresClient.get('/fapi/v1/klines', {
+                params: {
+                    symbol,
+                    interval,
+                    limit
+                }
+            });
+            return response.data;
+        } catch (error) {
+            console.error('❌ getKlines error:', error.response?.data || error.message);
+            throw new Error(`Unable to fetch k-line data: ${error.response?.data?.msg || error.message}`);
+        }
+    }
+
 }
